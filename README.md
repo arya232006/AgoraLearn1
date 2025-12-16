@@ -1,4 +1,5 @@
 <img width="2559" height="1356" alt="image" src="https://github.com/user-attachments/assets/71df90d5-b163-4032-9619-8a1612b53728" />
+<img width="2524" height="1314" alt="image" src="https://github.com/user-attachments/assets/13c21255-7b60-42ee-b77a-54f51127b272" />
 
 **AgoraLearn — Multilingual RAG + Voice Assistant**
 
