@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.27.0",
+    "@types/node": "^24.10.1",
     "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
