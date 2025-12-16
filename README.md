@@ -1,4 +1,5 @@
-<img width="1885" height="937" alt="image" src="https://github.com/user-attachments/assets/dcdbf134-1bf2-4b6c-b44e-9eb9a891cbd7" />
+<img width="2559" height="1356" alt="image" src="https://github.com/user-attachments/assets/71df90d5-b163-4032-9619-8a1612b53728" />
+
 **AgoraLearn — Multilingual RAG + Voice Assistant**
 
 - **Project:**: Backend for a voice-enabled, multilingual RAG (Retrieval-Augmented Generation) assistant.
