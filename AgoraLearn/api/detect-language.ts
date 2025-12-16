@@ -6,7 +6,38 @@
 const { franc } = require('franc-min');
 
 const isoMap = {
-  'spa': 'es', 'fra': 'fr', 'ita': 'it', 'deu': 'de', 'hin': 'hi', 'ben': 'bn', 'mar': 'mr', 'rus': 'ru', 'cmn': 'zh', 'jpn': 'ja', 'ara': 'ar', 'por': 'pt', 'tur': 'tr', 'tam': 'ta', 'guj': 'gu', 'pan': 'pa', 'urd': 'ur', 'fas': 'fa', 'pol': 'pl', 'ukr': 'uk', 'eng': 'en'
+  // Common languages mapped to project locale codes
+  spa: 'es',
+  fra: 'fr',
+  ita: 'it',
+  deu: 'de',
+  eng: 'en',
+  hin: 'hi',
+  ben: 'bn',
+  mar: 'mr',
+  tel: 'te',
+  kan: 'kn',
+  mal: 'ml',
+  guj: 'gu',
+  pan: 'pa',
+  urd: 'ur',
+  rus: 'ru',
+  por: 'pt',
+  nld: 'nl',
+  swe: 'sv',
+  pol: 'pl',
+  tur: 'tr',
+  vie: 'vi',
+  ind: 'id',
+  tha: 'th',
+  jpn: 'ja',
+  kor: 'ko',
+  ara: 'ar',
+  cmn: 'zh-CN', // Mandarin -> simplified by default
+  zho: 'zh-CN',
+  yue: 'zh-TW', // Cantonese -> traditional (approx)
+  fas: 'fa',
+  ukr: 'uk'
 };
 
 function detectLanguage(text) {

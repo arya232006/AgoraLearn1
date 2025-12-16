@@ -3,7 +3,34 @@
   "locale": {
     "source": "en",
     "targets": [
-      "es", "fr", "it", "de", "hi", "bn", "mr", "ru", "zh", "ja", "ar", "pt", "tr", "ta", "gu", "pa", "ur", "fa", "pl", "uk"
+      "es",
+      "hi",
+      "bn",
+      "mr",
+      "te",
+      "fr",
+      "it",
+      "de",
+      "pt",
+      "pt-BR",
+      "ru",
+      "ar",
+      "zh-CN",
+      "zh-TW",
+      "ja",
+      "ko",
+      "ur",
+      "pa",
+      "gu",
+      "kn",
+      "ml",
+      "nl",
+      "sv",
+      "pl",
+      "tr",
+      "vi",
+      "id",
+      "th"
     ]
   },
   "buckets": {
