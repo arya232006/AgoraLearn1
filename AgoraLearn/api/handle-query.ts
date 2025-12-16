@@ -2,6 +2,9 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { callTextModel } from './lib/llm-client';
 import { summarizeText, extractKeyPoints } from './utils/summarizer';
 import { extractTablesFromImage, analyzeChart } from './utils/vision-utils';
+import { extractTablesFromText } from './utils/text-table-extract';
+import { supabase } from '../lib/supabase';
+import { tableToChart } from './utils/table-to-chart';
 
 const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
 - "summarize" (user wants a document summary / key points)
@@ -17,7 +20,7 @@ User request:\n`;
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
-  const { text, docId, imageBase64, mimeType, question } = req.body || {};
+  const { text, docId, imageBase64, mimeType, question, reference, docText } = req.body || {};
   if (!text || typeof text !== 'string') return res.status(400).json({ ok: false, message: 'Missing text' });
 
   try {
@@ -67,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (question) {
           const qaPrompt = `Here is the extracted table JSON:\n${JSON.stringify(extracted.parsed)}\n\nQuestion: ${question}\n\nAnswer concisely:`;
           const qaResp = await callTextModel({ prompt: qaPrompt, maxTokens: 400 });
-          answer = qaResp.text;
+          answer = qaResp.text ?? null;
         }
         return res.json({ ok: true, intent, confidence: classification.confidence, result: { extracted: extracted.parsed, answer } });
       }
@@ -75,13 +78,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (intent === 'chart_analysis') {
+      // If an image payload was provided directly, analyze it first
       if (imageBase64) {
         const rawBase64 = (imageBase64 as string).replace(/^data:[^;]+;base64,/, '');
         const buffer = Buffer.from(rawBase64, 'base64');
         const chart = await analyzeChart(buffer, mimeType || 'image/png');
         return res.json({ ok: true, intent, confidence: classification.confidence, result: chart });
       }
-      return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No chart image attached. Please upload or capture the chart image.' } });
+        // If no imageBase64 was sent but a docId was provided, check for a cached chart from upload
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const cachePath = path.join(process.cwd(), '.agoralearn_cache', 'charts', `${docId}.json`);
+          if (fs.existsSync && fs.existsSync(cachePath)) {
+            try {
+              const raw = fs.readFileSync(cachePath, 'utf8');
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.chart) {
+                return res.json({ ok: true, intent, confidence: classification.confidence, result: parsed.chart });
+              }
+            } catch (e) {
+              console.warn('Failed to read chart cache for docId', docId, String(e));
+            }
+          }
+        } catch (e) {
+          console.warn('Chart cache check failed', String(e));
+        }
+
+        // If user provided a text reference or extracted document text, try to parse tables from text
+        let tableSource = (reference && String(reference).trim()) || (docText && String(docText).trim()) || null;
+        // If no inline text provided but a docId exists, try to fetch extracted text from the chunks table
+        if (!tableSource && docId) {
+          try {
+            const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', docId);
+            if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
+              tableSource = chunkRows.map((r: any) => r.text).join('\n');
+            }
+          } catch (e) {
+            console.warn('Failed to fetch chunks for docId', docId, String(e));
+          }
+        }
+        if (tableSource) {
+          const tables = await extractTablesFromText(tableSource);
+          if (tables && tables.length > 0) {
+            // pick first table for plotting by default
+            const chart = tableToChart(tables[0]);
+            // Optionally generate insights
+            let insights: string | null = null;
+            try {
+              const iprompt = `Given this chart JSON:\n${JSON.stringify(chart)}\nProvide a one-paragraph summary of the main takeaway.`;
+              const ip = await callTextModel({ prompt: iprompt, maxTokens: 200 });
+              insights = ip.text ?? null;
+            } catch (_) {
+              insights = null;
+            }
+            if (insights) (chart as any).insights = insights;
+            return res.json({ ok: true, intent, confidence: classification.confidence, result: { chart } });
+          }
+          return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No tables found in provided text.' } });
+        }
+
+        return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No chart image attached. Please upload or capture the chart image or provide table text selection.' } });
     }
 
     // default: RAG query (forward to existing RAG endpoint)

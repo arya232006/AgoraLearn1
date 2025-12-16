@@ -5,6 +5,9 @@ import { randomUUID } from 'crypto';
 import { chunkText } from '../lib/chunk';
 import { embedText } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
+import { analyzeChart } from './utils/vision-utils';
+import fs from 'fs';
+import path from 'path';
 import { safeParseJson } from '../utils/safeParse';
 
 const MAX_TEXT_LENGTH = 500_000;
@@ -410,6 +413,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           const result = await ingestTextAndStore(text, docId);
           console.log('[UPLOAD] Chunking/embedding succeeded. Chunks inserted:', result?.chunksInserted);
+          // If this was an image upload, try to produce chart analysis and cache it for later retrieval
+          try {
+            if ((mimeType || '').toLowerCase().startsWith('image/')) {
+              try {
+                const chart = await analyzeChart(parsed.fileBuffer as Buffer, mimeType || 'image/png');
+                const cacheDir = path.join(process.cwd(), '.agoralearn_cache', 'charts');
+                try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) {}
+                const cachePath = path.join(cacheDir, `${docId}.json`);
+                try { fs.writeFileSync(cachePath, JSON.stringify({ chart, cachedAt: new Date().toISOString() }, null, 2), 'utf8'); } catch (e) { console.warn('Failed to write chart cache', e); }
+                console.log('[UPLOAD] Chart analysis cached for docId', docId);
+              } catch (e) {
+                console.warn('[UPLOAD] Chart analysis failed for image upload:', String(e));
+              }
+            }
+          } catch (e) {
+            console.warn('[UPLOAD] Chart caching step failed:', String(e));
+          }
+
           const respObj = { ok: true, file: { id: docId, name: filename }, ...result };
           console.log('[UPLOAD] Response:', JSON.stringify(respObj));
           return res.status(200).json(respObj);

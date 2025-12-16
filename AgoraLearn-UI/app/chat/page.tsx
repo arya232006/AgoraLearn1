@@ -5,6 +5,7 @@ import { InlineMath, BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import DarkVeil from "@components/ui/DarkVeil";
 import Navbar from "@components/navbar";
+import ChartWrapper from "@components/ChartWrapper";
 import { Button } from "@components/ui/button";
 import { Card, CardContent } from "@components/ui/card";
 import { Input } from "@components/ui/input";
@@ -51,6 +52,16 @@ function renderMathInline(content: string) {
     elements.push(<span key="text-end">{content.slice(lastIndex)}</span>);
   }
   return <>{elements}</>;
+}
+
+function formatDate(dateStr?: string) {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    return d.toUTCString();
+  } catch {
+    return String(dateStr);
+  }
 }
 
 /**
@@ -305,6 +316,18 @@ export default function ChatPage() {
           const fallback = body?.result?.message || 'No table data found.';
           pushMessage({ id: makeId('a-'), role: 'assistant', kind: 'text', content: String(fallback), createdAt: new Date().toISOString() });
         }
+      } else if (body?.intent === 'chart_analysis' && body?.result) {
+        const parsed = body.result.chart ?? body.result.parsed ?? body.result;
+        const insights = body.result.insights ?? body.result.summary ?? null;
+        if (parsed) {
+            // debug: log chart payload to browser console to inspect shape
+            try { console.log("[AgoraLearn] chart payload:", parsed); } catch {}
+          // attach insights into parsed payload for ChartBubble
+          if (insights) parsed.insights = typeof insights === 'string' ? insights : JSON.stringify(insights);
+          pushMessage({ id: makeId('a-chart-'), role: 'assistant', kind: 'chart', payload: parsed, createdAt: new Date().toISOString() });
+        } else {
+          pushMessage({ id: makeId('a-'), role: 'assistant', kind: 'text', content: String(body?.result?.message ?? 'No chart data found.'), createdAt: new Date().toISOString() });
+        }
       } else {
         // default: show textual result (summary / rag / chart insights)
         const answer = body?.result?.summary ?? body?.result?.answer ?? body?.result ?? (body?.result?.insights ?? null);
@@ -399,11 +422,17 @@ export default function ChatPage() {
                               </section>
                             )) : <div>No table data</div>}
                           </div>
+                        ) : m.kind === 'chart' && m.payload ? (
+                          // lazy-load ChartBubble to avoid adding chart deps to initial bundle
+                          <React.Suspense fallback={<div>Rendering chart...</div>}>
+                            {/* @ts-ignore dynamic import for client component */}
+                            <ChartWrapper chart={m.payload} />
+                          </React.Suspense>
                         ) : (
                           renderMathInline(m.content ?? '')
                         )}
                       </div>
-                      <div className="text-xs text-gray-400 mt-1">{m.role} • {m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}</div>
+                      <div className="text-xs text-gray-400 mt-1">{m.role} • {formatDate(m.createdAt)}</div>
                     </div>
                   ))}
                 </div>
