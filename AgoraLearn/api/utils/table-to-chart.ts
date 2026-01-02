@@ -1,3 +1,5 @@
+import { callTextModel } from '../lib/llm-client';
+
 type Table = { title?: string; headers: string[]; rows: Array<Array<any>> };
 
 function isNumeric(v: any) {
@@ -8,7 +10,7 @@ function isNumeric(v: any) {
   return !isNaN(Number(s));
 }
 
-export function tableToChart(table: Table) {
+function tableToChartHeuristic(table: Table) {
   // Build column arrays
   const headers = table.headers || [];
   const cols: any[][] = headers.map((_, i) => table.rows.map((r) => r[i]));
@@ -52,4 +54,58 @@ export function tableToChart(table: Table) {
     yAxisLabel: series.length === 1 ? headers[yIndices[0]] || '' : '',
     series,
   };
+}
+
+export async function tableToChart(table: Table) {
+  try {
+    // Use LLM to determine chart configuration (columns and type)
+    const prompt = `You are a data visualization expert.
+Analyze this table to create the most meaningful chart.
+Headers: ${JSON.stringify(table.headers)}
+First 3 rows: ${JSON.stringify(table.rows.slice(0, 3))}
+
+Identify:
+1. The best chart type (line, bar, pie, scatter, area).
+2. The column to use for the X-axis (categories/time).
+3. The column(s) to use for the Y-axis (numeric values).
+
+Return ONLY JSON:
+{
+  "chartType": "line" | "bar" | "pie" | "scatter" | "area",
+  "xColumn": "exact_header_name",
+  "yColumns": ["exact_header_name_1", ...]
+}`;
+
+    const response = await callTextModel({ prompt, maxTokens: 300 });
+    const text = response.text.trim();
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      const config = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+      
+      const xIndex = table.headers.indexOf(config.xColumn);
+      const yIndices = config.yColumns.map((col: string) => table.headers.indexOf(col)).filter((i: number) => i >= 0);
+
+      if (xIndex >= 0 && yIndices.length > 0) {
+        const series = yIndices.map((yi: number) => ({
+          name: table.headers[yi],
+          points: table.rows.map((r) => ({
+            x: r[xIndex],
+            y: Number(String(r[yi]).replace(/,/g, '')) || 0
+          }))
+        }));
+
+        return {
+          chartType: config.chartType,
+          xAxisLabel: config.xColumn,
+          yAxisLabel: yIndices.length === 1 ? table.headers[yIndices[0]] : '',
+          series
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('LLM chart config failed, using heuristic:', e);
+  }
+
+  return tableToChartHeuristic(table);
 }

@@ -224,7 +224,8 @@ export default function ChatPage() {
           fd.append("audio", blob, "audio.webm");
           if (uploadedDoc) fd.append("docId", uploadedDoc.id);
           try {
-            const rsp = await fetch("http://localhost:3000/api/voice-query", { method: "POST", body: fd });
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
+            const rsp = await fetch(`${apiBase}/api/voice-query`, { method: "POST", body: fd });
             if (!rsp.ok) throw new Error("STT failed");
             const j = await rsp.json();
             const question = j?.question ?? j?.transcript;
@@ -295,7 +296,8 @@ export default function ChatPage() {
 
     try {
       // send to unified prompt router which classifies and returns structured results
-      const res = await fetch("http://localhost:3000/api/handle-query", {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
+      const res = await fetch(`${apiBase}/api/handle-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: queryText, docId: uploadedDoc?.id }),

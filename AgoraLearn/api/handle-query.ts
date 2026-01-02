@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const tables = await extractTablesFromText(tableSource);
           if (tables && tables.length > 0) {
             // pick first table for plotting by default
-            const chart = tableToChart(tables[0]);
+            const chart = await tableToChart(tables[0]);
             // Optionally generate insights
             let insights: string | null = null;
             try {

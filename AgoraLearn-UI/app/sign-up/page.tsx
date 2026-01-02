@@ -4,50 +4,69 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@components/ui/button"
 import { useRouter } from "next/navigation"
-import { supabase } from "@app/supabaseClient"
+import { auth } from "@app/firebase"
+import { 
+  signInWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  GithubAuthProvider,
+  onAuthStateChanged
+} from "firebase/auth"
 import DarkVeil from "@components/ui/DarkVeil"
 
 export default function SignUpPage() {
     const router = useRouter();
 
     useEffect(() => {
-      const checkUser = async () => {
-        const { data } = await supabase.auth.getUser();
-        if (data.user) {
-          router.push("/dashboard");
-        }
-      };
-      checkUser();
-      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
           router.push("/dashboard");
         }
       });
-      return () => {
-        listener?.subscription?.unsubscribe();
-      };
+      return () => unsubscribe();
     }, [router]);
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    setError(null)
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-      if (error) {
-        // Optionally show error message
-        console.error(error.message)
-      } else {
-        // Optionally redirect or show success message
-      }
+      await signInWithEmailAndPassword(auth, email, password)
+      // Redirect handled by useEffect
+    } catch (err: any) {
+      setError(err.message || "Sign in failed")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    setOauthLoading(true)
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setOauthLoading(false)
+    }
+  }
+
+  const handleGithubSignIn = async () => {
+    setOauthLoading(true)
+    try {
+      const provider = new GithubAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setOauthLoading(false)
     }
   }
 
@@ -66,11 +85,7 @@ export default function SignUpPage() {
             variant="outline"
             size="lg"
             className="w-full bg-transparent text-white"
-            onClick={async () => {
-              setOauthLoading(true)
-              await supabase.auth.signInWithOAuth({ provider: "google" })
-              setOauthLoading(false)
-            }}
+            onClick={handleGoogleSignIn}
             disabled={oauthLoading}
           >
             <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" aria-hidden>
@@ -85,11 +100,7 @@ export default function SignUpPage() {
             variant="outline"
             size="lg"
             className="w-full bg-transparent text-white"
-            onClick={async () => {
-              setOauthLoading(true)
-              await supabase.auth.signInWithOAuth({ provider: "github" })
-              setOauthLoading(false)
-            }}
+            onClick={handleGithubSignIn}
             disabled={oauthLoading}
           >
             <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -133,6 +144,8 @@ export default function SignUpPage() {
             </label>
             <Link href="/forgot-password" className="text-white/80 hover:underline">Forgot?</Link>
           </div>
+
+          {error && <p className="text-sm text-rose-400">{error}</p>}
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "Signing in..." : "Sign in"}

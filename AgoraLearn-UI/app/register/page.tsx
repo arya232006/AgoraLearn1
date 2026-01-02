@@ -1,34 +1,33 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
 import { Button } from "@components/ui/button"
-import { supabase } from "@app/supabaseClient"
+import { auth } from "@app/firebase"
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  GithubAuthProvider,
+  updateProfile,
+  onAuthStateChanged
+} from "firebase/auth"
 import DarkVeil from "@components/ui/DarkVeil"
 
 export default function RegisterPage() {
     const router = useRouter();
 
     useEffect(() => {
-      const checkUser = async () => {
-        const { data } = await supabase.auth.getUser();
-        if (data.user) {
-          router.push("/dashboard");
-        }
-      };
-      checkUser();
-      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
           router.push("/dashboard");
         }
       });
-      return () => {
-        listener?.subscription?.unsubscribe();
-      };
+      return () => unsubscribe();
     }, [router]);
+
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -46,21 +45,41 @@ export default function RegisterPage() {
     }
     setLoading(true)
     try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { name } }
-      })
-      if (error) {
-        setError(error.message)
-      } else {
-        setError(null)
-        // Optionally redirect or show success message
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+      if (name) {
+        await updateProfile(userCredential.user, {
+          displayName: name
+        })
       }
-    } catch (err) {
-      setError("Registration failed")
+      // Redirect handled by useEffect
+    } catch (err: any) {
+      setError(err.message || "Registration failed")
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    setOauthLoading(true)
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setOauthLoading(false)
+    }
+  }
+
+  const handleGithubSignIn = async () => {
+    setOauthLoading(true)
+    try {
+      const provider = new GithubAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setOauthLoading(false)
     }
   }
 
@@ -79,11 +98,7 @@ export default function RegisterPage() {
             variant="outline"
             size="lg"
             className="w-full bg-transparent text-white"
-            onClick={async () => {
-              setOauthLoading(true)
-              await supabase.auth.signInWithOAuth({ provider: "google" })
-              setOauthLoading(false)
-            }}
+            onClick={handleGoogleSignIn}
             disabled={oauthLoading}
           >
             Continue with Google
@@ -93,11 +108,7 @@ export default function RegisterPage() {
             variant="outline"
             size="lg"
             className="w-full bg-transparent text-white"
-            onClick={async () => {
-              setOauthLoading(true)
-              await supabase.auth.signInWithOAuth({ provider: "github" })
-              setOauthLoading(false)
-            }}
+            onClick={handleGithubSignIn}
             disabled={oauthLoading}
           >
             Continue with GitHub

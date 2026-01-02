@@ -36,7 +36,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@vercel/node": "^2.0.0",
-    "lingo.dev": "^0.117.6",
+    "lingo.dev": "^0.117.20",
     "typescript": "^5.1.6"
   }
 }

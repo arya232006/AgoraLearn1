@@ -13,10 +13,13 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from "@components/ui/avatar"
 import DarkVeil from '@components/ui/DarkVeil';
 import { useEffect, useState } from 'react'
-import { supabase } from '../app/supabaseClient'
+import { auth } from '../app/firebase'
+import { useAuthState } from 'react-firebase-hooks/auth'
+import { signOut } from 'firebase/auth'
 
 export default function Navbar() {
   const pathname = usePathname()
+  const [user, loading, error] = useAuthState(auth);
 
   // Mock user data (fallback)
   const mockUser = {
@@ -25,59 +28,15 @@ export default function Navbar() {
     image: "/placeholder-user.jpg",
   }
 
-  // Try to load a real user from localStorage (client-side only).
-  const [user, setUser] = useState<typeof mockUser | null>(null)
+  const displayUser = user ? {
+    name: user.displayName || user.email || mockUser.name,
+    email: user.email || mockUser.email,
+    image: user.photoURL || mockUser.image
+  } : null;
 
-  useEffect(() => {
-    try {
-      // Try Supabase first
-      ;(async () => {
-        try {
-          const { data, error } = await supabase.auth.getUser()
-          if (!error && data?.user) {
-            setUser({
-              name: data.user.user_metadata?.full_name || data.user.email || mockUser.name,
-              email: data.user.email || mockUser.email,
-              image: (data.user.user_metadata as any)?.avatar_url || mockUser.image,
-            })
-            return
-          }
-        } catch (e) {
-          // ignore and fall back to localStorage
-        }
-      })()
-
-      const candidates = [
-        localStorage.getItem('agoralearn:user'),
-        localStorage.getItem('user'),
-        localStorage.getItem('profile'),
-      ]
-      for (const c of candidates) {
-        if (!c) continue
-        try {
-          const parsed = JSON.parse(c)
-          if (parsed && (parsed.name || parsed.email)) {
-            setUser({
-              name: parsed.name || parsed.user?.name || mockUser.name,
-              email: parsed.email || parsed.user?.email || mockUser.email,
-              image: parsed.image || parsed.user?.image || mockUser.image,
-            })
-            return
-          }
-        } catch {
-          // Not JSON, maybe a raw name string
-          if (c && typeof c === 'string') {
-            setUser({ name: c, email: '', image: mockUser.image })
-            return
-          }
-        }
-      }
-    } catch (err) {
-      // ignore
-    }
-    // fallback to null so UI uses mockUser
-    setUser(null)
-  }, [])
+  const handleSignOut = async () => {
+    await signOut(auth);
+  };
 
   const navItems = [
     { name: "Dashboard", href: "/dashboard" },
@@ -119,20 +78,20 @@ export default function Navbar() {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
                 <Avatar>
-                  <AvatarImage src={(user || mockUser).image || "/placeholder.svg"} alt={(user || mockUser).name} />
-                  <AvatarFallback>{((user || mockUser).name || "?").charAt(0).toUpperCase()}</AvatarFallback>
+                  <AvatarImage src={(displayUser || mockUser).image || "/placeholder.svg"} alt={(displayUser || mockUser).name} />
+                  <AvatarFallback>{((displayUser || mockUser).name || "?").charAt(0).toUpperCase()}</AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <div className="flex items-center space-x-2 p-2">
                 <div className="flex flex-col space-y-1 leading-none">
-                  <p className="font-medium">{(user || mockUser).name}</p>
-                  <p className="w-[200px] truncate text-sm text-muted-foreground">{(user || mockUser).email}</p>
+                  <p className="font-medium">{(displayUser || mockUser).name}</p>
+                  <p className="w-[200px] truncate text-sm text-muted-foreground">{(displayUser || mockUser).email}</p>
                 </div>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => alert("Sign out clicked")}>Sign Out</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
