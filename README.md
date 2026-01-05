@@ -143,10 +143,7 @@ Notes:
 - Images (OCR): `.png`, `.jpg`, `.jpeg` (server-side OCR to extract text)
 - Programmatic text uploads: POSTed JSON with `"text"` field
 
-Notes:
-- OCR and PDF extraction quality depend on file quality and layout.
-- Large or scanned PDFs with complex layouts may require additional preprocessing.
-- If you require advanced OCR or layout parsing, integrate a specialized OCR/vision service.
+
 
 ---
 
