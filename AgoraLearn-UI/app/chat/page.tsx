@@ -9,7 +9,20 @@ import ChartWrapper from "@components/ChartWrapper";
 import { Button } from "@components/ui/button";
 import { Card, CardContent } from "@components/ui/card";
 import { Input } from "@components/ui/input";
-import { Send, Mic, MicOff } from "lucide-react";
+import { 
+  Send, 
+  Mic, 
+  MicOff, 
+  Headphones, 
+  AudioLines,
+  Paperclip, 
+  X, 
+  Bot, 
+  User, 
+  Sparkles, 
+  FileText, 
+  Download
+} from "lucide-react";
 
 /**
  * Types
@@ -127,6 +140,16 @@ export default function ChatPage() {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const voiceTriggerRef = useRef<HTMLDivElement>(null); // Ref to trigger voice recorder
+
+  // conversation mode
+  const [conversationMode, setConversationMode] = useState(false);
+  const conversationModeRef = useRef(false); // Ref to track mode inside closures
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+
+  useEffect(() => {
+    conversationModeRef.current = conversationMode;
+  }, [conversationMode]);
 
   // UI / popups
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -212,6 +235,37 @@ export default function ChatPage() {
       audioChunksRef.current = [];
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // --- Audio Analysis for Silence Detection ---
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const audioContext = new AudioContextClass();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        let speechDetected = false;
+        
+        const checkAudioLevel = () => {
+            if (mediaRecorderRef.current?.state !== "recording") return;
+            analyser.getByteFrequencyData(dataArray);
+            // Calculate average volume
+            let sum = 0;
+            for(let i = 0; i < bufferLength; i++) {
+                sum += dataArray[i];
+            }
+            const average = sum / bufferLength;
+            
+            // Threshold to detect speech vs background noise
+            if (average > 10) {
+                speechDetected = true;
+            }
+            requestAnimationFrame(checkAudioLevel);
+        };
+        // --------------------------------------------
+
         const mr = new MediaRecorder(stream);
         mediaRecorderRef.current = mr;
         mr.ondataavailable = (ev) => {
@@ -219,6 +273,24 @@ export default function ChatPage() {
         };
         mr.onstop = async () => {
           setIsRecording(false);
+          
+          // Cleanup Audio Context
+          source.disconnect();
+          if (audioContext.state !== 'closed') await audioContext.close();
+          
+          // Stop all tracks to release mic
+          stream.getTracks().forEach(track => track.stop());
+
+          // If no speech was detected, don't send to API
+          if (!speechDetected) {
+             console.log("No speech detected (silence), skipping API call.");
+             // If in conversation mode, restart listening immediately
+             if (conversationModeRef.current) {
+                 setTimeout(() => handleVoiceInput(), 100);
+             }
+             return;
+          }
+
           const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
           const fd = new FormData();
           fd.append("audio", blob, "audio.webm");
@@ -229,17 +301,35 @@ export default function ChatPage() {
             if (!rsp.ok) throw new Error("STT failed");
             const j = await rsp.json();
             const question = j?.question ?? j?.transcript;
-            if (typeof question === "string" && question.trim()) {
-              await sendQuery(question);
+            
+            // Filter out common hallucinations
+            const hallucinations = ["you", "thank you", "bye", ".", "..", "...", "you.", "thank you.", "mbc"];
+            const cleanQuestion = typeof question === "string" ? question.trim() : "";
+
+            if (cleanQuestion && !hallucinations.includes(cleanQuestion.toLowerCase())) {
+              await sendQuery(cleanQuestion);
             } else {
-              pushMessage({ id: makeId("a-"), role: "assistant", content: "I couldn't hear a question." });
+              // Hallucination or empty
+              if (conversationModeRef.current) {
+                 // Restart listening if we ignored the input
+                 setTimeout(() => handleVoiceInput(), 100);
+              } else {
+                 pushMessage({ id: makeId("a-"), role: "assistant", content: "I couldn't hear a clear question." });
+              }
             }
           } catch (err: any) {
             console.error(err);
-            pushMessage({ id: makeId("a-"), role: "assistant", content: "Voice processing failed." });
+            if (conversationModeRef.current) {
+                 // Restart listening on error
+                 setTimeout(() => handleVoiceInput(), 100);
+            } else {
+                 pushMessage({ id: makeId("a-"), role: "assistant", content: "Voice processing failed." });
+            }
           }
         };
         mr.start();
+        checkAudioLevel(); // Start monitoring
+
         setTimeout(() => {
           if (mr.state !== "inactive") mr.stop();
         }, 25_000);
@@ -300,10 +390,31 @@ export default function ChatPage() {
       const res = await fetch(`${apiBase}/api/handle-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: queryText, docId: uploadedDoc?.id }),
+        body: JSON.stringify({ text: queryText, docId: uploadedDoc?.id, replyWithAudio: conversationModeRef.current }),
       });
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       const body = await res.json();
+
+      // Play Audio & Loop
+      if (body.audioBase64) {
+        setIsAiSpeaking(true);
+        const audio = new Audio(`data:audio/mp3;base64,${body.audioBase64}`);
+        audio.onended = () => {
+          setIsAiSpeaking(false);
+          if (conversationModeRef.current) {
+             // Trigger voice recorder again directly
+             handleVoiceInput();
+          }
+        };
+        audio.play().catch(e => console.error("Audio play failed", e));
+      } else {
+          // If no audio response but in conversation mode, restart listening anyway?
+          // Or maybe the user wants to read? 
+          // Assuming if conversation mode is ON, we always want to listen after response.
+          if (conversationModeRef.current) {
+              setTimeout(() => handleVoiceInput(), 1000); // Give a second to read
+          }
+      }
 
       // handle table responses specially
       if (body?.intent === 'table_qa' && body?.result) {
@@ -343,6 +454,11 @@ export default function ChatPage() {
       console.error("converse error", err);
       pushMessage({ id: makeId("a-"), role: "assistant", content: "Sorry — something went wrong." });
       setError(String(err?.message ?? "Error"));
+      
+      // If error occurs in conversation mode, restart listening
+      if (conversationModeRef.current) {
+          setTimeout(() => handleVoiceInput(), 2000);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -373,171 +489,309 @@ export default function ChatPage() {
 
   // UI
   return (
-    <>
-      <Navbar />
-      <div className="min-h-screen bg-gray-50 flex flex-col relative">
-        <div className="absolute inset-0 z-0 pointer-events-none">
-          <DarkVeil resolutionScale={1} hueShift={0} noiseIntensity={0.02} scanlineIntensity={0.02} speed={0.4} warpAmount={0.02} />
+    <div className="min-h-screen bg-black text-white font-sans selection:bg-indigo-500/30">
+        <div className="fixed inset-0 z-0 pointer-events-none">
+             <DarkVeil resolutionScale={1} hueShift={0} noiseIntensity={0.02} scanlineIntensity={0.02} speed={0.4} warpAmount={0.02} />
         </div>
-        <div className="relative z-10 max-w-4xl w-full mx-auto p-4 flex-1 flex flex-col">
-          <header className="flex items-center gap-4 mb-4">
-            <h1 className="text-2xl font-semibold text-white">AgoraLearn — Chat</h1>
-            <div className="ml-auto flex items-center gap-2 text-sm">
-            </div>
-          </header>
-
-          <Card className="flex-1 flex flex-col bg-transparent border-0 shadow-none">
-            <CardContent className="flex-1 overflow-auto p-4 bg-transparent" onMouseUp={handleMouseUp}>
-              {messages.length === 0 ? (
-                <div className="text-gray-500">No messages yet — ask something.</div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((m) => (
-                    <div key={m.id} className={`max-w-full ${m.role === "user" ? "text-right" : "text-left"}`}>
-                      <div className={`inline-block p-3 rounded-lg ${m.role === "user" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-900"}`} style={{ whiteSpace: "pre-wrap" }}>
-                        {m.kind === 'table' && m.payload ? (
-                          // render structured tables
-                          <div style={{ maxWidth: 800, overflowX: 'auto' }}>
-                            {Array.isArray(m.payload) ? m.payload.map((t: any, ti: number) => (
-                              <section key={ti} style={{ marginBottom: 12 }}>
-                                {t.title && <div style={{ fontWeight: 600, marginBottom: 6 }}>{t.title}</div>}
-                                <div style={{ overflowX: 'auto' }}>
-                                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                                    <thead>
-                                      <tr>
-                                        {(t.columns || t.headers || []).map((h: any, hi: number) => (
-                                          <th key={hi} style={{ borderBottom: '1px solid #ddd', padding: 8, textAlign: 'left', fontWeight: 600 }}>{String(h)}</th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {(t.rows || t.data || []).map((r: any, ri: number) => (
-                                        <tr key={ri}>
-                                          {r.map((c: any, ci: number) => (
-                                            <td key={ci} style={{ padding: 8, borderBottom: '1px solid #f2f2f2' }}>{renderMathInline(String(c))}</td>
-                                          ))}
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </section>
-                            )) : <div>No table data</div>}
-                          </div>
-                        ) : m.kind === 'chart' && m.payload ? (
-                          // lazy-load ChartBubble to avoid adding chart deps to initial bundle
-                          <React.Suspense fallback={<div>Rendering chart...</div>}>
-                            {/* @ts-ignore dynamic import for client component */}
-                            <ChartWrapper chart={m.payload} />
-                          </React.Suspense>
-                        ) : (
-                          renderMathInline(m.content ?? '')
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-400 mt-1">{m.role} • {formatDate(m.createdAt)}</div>
+        
+        <div className="relative z-10 flex flex-col h-screen">
+            <Navbar />
+            
+            {/* Main Chat Area */}
+            <main className="flex-1 overflow-hidden flex flex-col relative max-w-5xl mx-auto w-full pt-4">
+                
+                {/* Header / Toolbar */}
+                <div className="px-6 py-3 flex items-center justify-between bg-black/20 backdrop-blur-sm border-b border-white/5 mx-4 rounded-t-2xl">
+                    <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-full bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
+                            <Sparkles className="h-4 w-4 text-indigo-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-sm font-medium text-white">AgoraLearn AI</h2>
+                            <p className="text-xs text-gray-400">Always here to help</p>
+                        </div>
                     </div>
-                  ))}
+                    <div className="flex items-center gap-2">
+                         {/* Export Button */}
+                         <Button variant="ghost" size="icon" onClick={exportConversation} className="text-gray-400 hover:text-white hover:bg-white/10">
+                            <Download className="h-4 w-4" />
+                         </Button>
+                    </div>
                 </div>
-              )}
 
-              {popupPosition && selectedText && (
-                <div style={{ position: "absolute", top: popupPosition.top, left: popupPosition.left, background: "#fff", border: "1px solid #ccc", borderRadius: 6, padding: "6px 10px", zIndex: 1000 }}>
-                  <Button size="sm" onClick={handleAskAgoraLearn}>Ask AgoraLearn</Button>
+                {/* Messages Scroll Area */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent mx-4 bg-black/20 backdrop-blur-sm border-x border-white/5" onMouseUp={handleMouseUp}>
+                    {messages.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-50">
+                            <Bot className="h-16 w-16 text-indigo-500/50 mb-4" />
+                            <h3 className="text-xl font-medium text-white mb-2">Welcome to AgoraLearn</h3>
+                            <p className="text-sm text-gray-400 max-w-md">
+                                Ask questions, upload documents, or start a voice conversation. I'm ready to assist you.
+                            </p>
+                        </div>
+                    ) : (
+                        messages.map((m) => (
+                            <div key={m.id} className={`flex gap-4 ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                                {/* Avatar */}
+                                <div className={`shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${m.role === "user" ? "bg-indigo-600" : "bg-emerald-600/20 border border-emerald-500/30"}`}>
+                                    {m.role === "user" ? <User className="h-4 w-4 text-white" /> : <Bot className="h-4 w-4 text-emerald-400" />}
+                                </div>
+
+                                {/* Bubble */}
+                                <div className={`flex flex-col max-w-[80%] ${m.role === "user" ? "items-end" : "items-start"}`}>
+                                    <div className={`px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
+                                        m.role === "user" 
+                                        ? "bg-indigo-600 text-white rounded-tr-sm" 
+                                        : "bg-white/5 border border-white/10 text-gray-100 rounded-tl-sm backdrop-blur-md"
+                                    }`}>
+                                        {m.kind === 'table' && m.payload ? (
+                                          // render structured tables
+                                          <div style={{ maxWidth: 800, overflowX: 'auto' }}>
+                                            {Array.isArray(m.payload) ? m.payload.map((t: any, ti: number) => (
+                                              <section key={ti} style={{ marginBottom: 12 }}>
+                                                {t.title && <div style={{ fontWeight: 600, marginBottom: 6 }}>{t.title}</div>}
+                                                <div style={{ overflowX: 'auto' }}>
+                                                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }}>
+                                                    <thead>
+                                                      <tr>
+                                                        {(t.columns || t.headers || []).map((h: any, hi: number) => (
+                                                          <th key={hi} style={{ borderBottom: '1px solid rgba(255,255,255,0.2)', padding: 8, textAlign: 'left', fontWeight: 600 }}>{String(h)}</th>
+                                                        ))}
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                      {(t.rows || t.data || []).map((r: any, ri: number) => (
+                                                        <tr key={ri}>
+                                                          {r.map((c: any, ci: number) => (
+                                                            <td key={ci} style={{ padding: 8, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>{renderMathInline(String(c))}</td>
+                                                          ))}
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </section>
+                                            )) : <div>No table data</div>}
+                                          </div>
+                                        ) : m.kind === 'chart' && m.payload ? (
+                                          // lazy-load ChartBubble to avoid adding chart deps to initial bundle
+                                          <React.Suspense fallback={<div>Rendering chart...</div>}>
+                                            {/* @ts-ignore dynamic import for client component */}
+                                            <ChartWrapper chart={m.payload} />
+                                          </React.Suspense>
+                                        ) : (
+                                          renderMathInline(m.content ?? '')
+                                        )}
+                                    </div>
+                                    <span className="text-[10px] text-gray-500 mt-1 px-1">
+                                        {formatDate(m.createdAt)}
+                                    </span>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                    
+                    {isLoading && (
+                         <div className="flex gap-4">
+                            <div className="shrink-0 h-8 w-8 rounded-full bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center">
+                                <Bot className="h-4 w-4 text-emerald-400" />
+                            </div>
+                            <div className="bg-white/5 border border-white/10 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-2">
+                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                         </div>
+                    )}
+                    <div ref={messagesEndRef} />
                 </div>
-              )}
 
-              {isLoading && (
-                <div className="flex justify-start mt-2">
-                  <div className="bg-muted text-foreground max-w-xs px-4 py-3 rounded-lg rounded-bl-none">
-                    <p className="text-sm">Thinking...</p>
-                  </div>
+                {/* Input Area */}
+                <div className="p-4 mx-4 mb-4 bg-black/40 backdrop-blur-xl border border-white/10 rounded-b-2xl rounded-t-none">
+                    {/* Inline Reference Preview */}
+                    {showInlineReference && referenceText && (
+                        <div className="mb-3 p-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 flex items-start gap-3">
+                            <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider mt-0.5">Reference</div>
+                            <div className="flex-1 text-sm text-gray-300 line-clamp-2 italic">"{referenceText}"</div>
+                            <button onClick={() => { setReferenceText(''); setShowInlineReference(false); }} className="text-gray-400 hover:text-white">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Uploaded File Preview */}
+                    {uploadedDoc && (
+                        <div className="mb-3 flex items-center gap-2">
+                            <div className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs text-gray-300 flex items-center gap-2">
+                                <FileText className="h-3 w-3 text-indigo-400" />
+                                <span className="max-w-[200px] truncate">{uploadedDoc.name}</span>
+                                <button onClick={() => setUploadedDoc(null)} className="hover:text-red-400 ml-1"><X className="h-3 w-3" /></button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Input Bar */}
+                    <div className="flex items-end gap-2">
+                        <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={() => setShowUploadModal(true)}
+                            className="rounded-full h-10 w-10 bg-white/5 border-white/10 text-gray-400 hover:text-white hover:bg-white/10 hover:border-white/20"
+                        >
+                            <Paperclip className="h-4 w-4" />
+                        </Button>
+
+                        <div className="flex-1 relative bg-white/5 border border-white/10 rounded-2xl focus-within:border-indigo-500/50 focus-within:bg-white/10 transition-all">
+                            <textarea
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey && !isLoading) {
+                                        e.preventDefault();
+                                        handleSendMessage();
+                                    }
+                                }}
+                                placeholder="Ask anything..."
+                                className="w-full bg-transparent border-none text-white placeholder-gray-500 px-4 py-3 focus:ring-0 resize-none max-h-32 min-h-11"
+                                rows={1}
+                                style={{ height: 'auto', minHeight: '44px' }} 
+                                disabled={isLoading}
+                            />
+                        </div>
+
+                        {/* Voice Controls */}
+                        <div className="flex items-center gap-1" ref={voiceTriggerRef}>
+                             <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={handleVoiceInput}
+                                className={`rounded-full h-10 w-10 transition-all ${isRecording ? "bg-red-500/20 text-red-400 animate-pulse border border-red-500/50" : "text-gray-400 hover:text-white hover:bg-white/10"}`}
+                            >
+                                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                            </Button>
+                            
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                    if (conversationMode) {
+                                        // Turn OFF
+                                        setConversationMode(false);
+                                        // If currently recording, stop it
+                                        if (isRecording) {
+                                            mediaRecorderRef.current?.stop();
+                                        }
+                                        // If AI is speaking, stop it
+                                        const audioElements = document.getElementsByTagName('audio');
+                                        for(let i=0; i<audioElements.length; i++) {
+                                            audioElements[i].pause();
+                                            audioElements[i].currentTime = 0;
+                                        }
+                                        setIsAiSpeaking(false);
+                                    } else {
+                                        // Turn ON
+                                        setConversationMode(true);
+                                        // Start listening immediately if not already
+                                        if (!isRecording) handleVoiceInput();
+                                    }
+                                }}
+                                className={`rounded-full h-10 w-10 transition-all ${
+                                    conversationMode 
+                                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]" 
+                                    : "text-gray-400 hover:text-white hover:bg-white/10"
+                                }`}
+                                title={conversationMode ? "Stop Voice Mode" : "Start Voice Mode"}
+                            >
+                                {conversationMode ? (
+                                    <div className="flex items-center justify-center">
+                                        <AudioLines className="h-5 w-5 animate-pulse" />
+                                    </div>
+                                ) : (
+                                    <Headphones className="h-4 w-4" />
+                                )}
+                            </Button>
+                        </div>
+
+                        <Button
+                            onClick={handleSendMessage}
+                            disabled={!inputValue.trim() || isLoading}
+                            size="icon"
+                            className="rounded-full h-10 w-10 bg-indigo-600 hover:bg-indigo-500 text-white border-none shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Send className="h-4 w-4" />
+                        </Button>
+                    </div>
+                    
+                    {/* Status / Error */}
+                    <div className="absolute bottom-full left-0 w-full px-4 pb-2 pointer-events-none">
+                         {showSuccess && <div className="text-xs text-green-400 bg-black/80 backdrop-blur px-2 py-1 rounded inline-block">File uploaded successfully!</div>}
+                         {error && <div className="text-xs text-red-400 bg-black/80 backdrop-blur px-2 py-1 rounded inline-block">{error}</div>}
+                         {uploadProgress !== null && <div className="text-xs text-indigo-400 bg-black/80 backdrop-blur px-2 py-1 rounded inline-block">Uploading: {uploadProgress}%</div>}
+                    </div>
                 </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </CardContent>
-
-            <div className="border-t border-border p-4 relative">
-              {/* Inline reference (set when user selects text and clicks Ask AgoraLearn) */}
-              {showInlineReference && referenceText && (
-                <div className="mb-3 p-2 rounded border bg-white flex items-start gap-3">
-                  <div className="text-sm font-semibold">Reference:</div>
-                  <div className="flex-1 text-sm text-gray-700" style={{ whiteSpace: 'pre-wrap' }}>{referenceText}</div>
-                  <div>
-                    <Button size="sm" variant="outline" onClick={() => { setReferenceText(''); setShowInlineReference(false); }}>Clear</Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-2 items-center">
-                <Button type="button" variant="outline" size="icon" onClick={() => setShowUploadModal(true)}>+</Button>
-                <Button
-                  type="button"
-                  variant={isRecording ? "default" : "outline"}
-                  size="icon"
-                  onClick={handleVoiceInput}
-                  className={isRecording ? "bg-red-600 text-white" : ""}
-                  aria-label={isRecording ? "Stop recording" : "Record voice"}
-                  title={isRecording ? "Stop recording" : "Record voice"}
-                >
-                  {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                </Button>
-                <Input
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !isLoading) handleSendMessage();
-                  }}
-                  placeholder="Ask a question..."
-                  className="flex-1 bg-white text-black placeholder-gray-500 rounded-md border border-gray-200 px-3 py-2"
-                  disabled={isLoading}
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!inputValue.trim() || isLoading}
-                  size="icon"
-                  className="bg-white text-black border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {uploadedDoc && (
-                <div className="mt-4 flex items-center gap-3">
-                  <div className="font-semibold">Uploaded File:</div>
-                  <div className="bg-muted px-3 py-2 rounded text-foreground text-sm">{uploadedDoc.name}</div>
-                  <Button size="sm" variant="outline" onClick={() => setUploadedDoc(null)}>Remove</Button>
-                  <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()}>Replace</Button>
-                </div>
-              )}
-
-              {showSuccess && <div className="mt-2 text-green-600">File uploaded successfully!</div>}
-              {error && <div className="mt-2 text-red-600">{error}</div>}
-              {uploadProgress !== null && <div className="mt-2 text-sm">+: {uploadProgress}%</div>}
-            </div>
-          </Card>
+            </main>
         </div>
-      </div>
 
-      {/* + modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowUploadModal(false)} />
-          <div className="bg-white rounded-lg shadow-lg p-6 z-10 w-full max-w-lg">
-            <div className="mb-4 font-semibold">+ Document</div>
-            <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0]); }} className={`border-2 border-dashed rounded-lg p-8 text-center ${isDragging ? "border-primary" : "border-border"}`}>
-              <p className="mb-2">Drag and drop a file here</p>
-              <div className="mb-3">
-                <input ref={fileInputRef} type="file" onChange={handleFileInputChange} className="hidden" accept=".pdf,.doc,.docx,.txt,image/*" />
-                <Button onClick={() => fileInputRef.current?.click()}>Choose file</Button>
-              </div>
-              {uploadedFile && <div className="mt-4 bg-muted p-3 rounded">{uploadedFile.name} <Button onClick={() => setUploadedFile(null)} size="sm" variant="ghost">Remove</Button></div>}
-              {uploadedFile && <div className="mt-4"><Button onClick={handleUpload} disabled={isUploading}>{isUploading ? `Uploading${uploadProgress !== null ? ` (${uploadProgress}%)` : "..."}` : "Upload"}</Button></div>}
+        {/* Upload Modal */}
+        {showUploadModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div className="bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl p-6 z-10 w-full max-w-lg relative overflow-hidden">
+                    <div className="absolute inset-0 bg-indigo-500/5 pointer-events-none" />
+                    <div className="relative z-10">
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-lg font-semibold text-white">Upload Document</h3>
+                            <button onClick={() => setShowUploadModal(false)} className="text-gray-400 hover:text-white"><X className="h-5 w-5" /></button>
+                        </div>
+                        
+                        <div 
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} 
+                            onDragLeave={() => setIsDragging(false)} 
+                            onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0]); }} 
+                            className={`border-2 border-dashed rounded-xl p-10 text-center transition-all ${isDragging ? "border-indigo-500 bg-indigo-500/10" : "border-white/10 hover:border-white/20 bg-white/5"}`}
+                        >
+                            <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
+                                <FileText className="h-6 w-6 text-indigo-400" />
+                            </div>
+                            <p className="text-gray-300 mb-2">Drag and drop your file here</p>
+                            <p className="text-xs text-gray-500 mb-6">PDF, DOCX, TXT supported</p>
+                            
+                            <input ref={fileInputRef} type="file" onChange={handleFileInputChange} className="hidden" accept=".pdf,.doc,.docx,.txt,image/*" />
+                            <Button onClick={() => fileInputRef.current?.click()} variant="outline" className="border-white/10 hover:bg-white/10 text-white">Browse Files</Button>
+                        </div>
+
+                        {uploadedFile && (
+                            <div className="mt-4 bg-white/5 border border-white/10 p-3 rounded-lg flex items-center justify-between">
+                                <span className="text-sm text-gray-200 truncate max-w-[200px]">{uploadedFile.name}</span>
+                                <Button onClick={() => setUploadedFile(null)} size="sm" variant="ghost" className="h-8 text-red-400 hover:text-red-300 hover:bg-red-400/10">Remove</Button>
+                            </div>
+                        )}
+
+                        <div className="mt-6 flex justify-end gap-3">
+                            <Button onClick={() => setShowUploadModal(false)} variant="ghost" className="text-gray-400 hover:text-white">Cancel</Button>
+                            <Button 
+                                onClick={handleUpload} 
+                                disabled={isUploading || !uploadedFile}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white"
+                            >
+                                {isUploading ? `Uploading${uploadProgress !== null ? ` (${uploadProgress}%)` : "..."}` : "Upload Document"}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div className="mt-4 text-right"><Button onClick={() => setShowUploadModal(false)} variant="outline">Close</Button></div>
-          </div>
-        </div>
-      )}
-    </>
+        )}
+
+        {/* Selection Popup */}
+        {popupPosition && selectedText && (
+            <div style={{ position: "absolute", top: popupPosition.top, left: popupPosition.left, zIndex: 1000 }} className="animate-in fade-in zoom-in duration-200">
+                <Button size="sm" onClick={handleAskAgoraLearn} className="bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 rounded-full px-4">
+                    <Sparkles className="h-3 w-3 mr-2" />
+                    Ask AI
+                </Button>
+            </div>
+        )}
+    </div>
   );
 }

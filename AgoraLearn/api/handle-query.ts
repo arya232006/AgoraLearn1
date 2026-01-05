@@ -5,6 +5,7 @@ import { extractTablesFromImage, analyzeChart } from './utils/vision-utils';
 import { extractTablesFromText } from './utils/text-table-extract';
 import { supabase } from '../lib/supabase';
 import { tableToChart } from './utils/table-to-chart';
+import { generateSpeech } from './utils/tts-utils';
 
 const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
 - "summarize" (user wants a document summary / key points)
@@ -152,7 +153,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           body: JSON.stringify({ query: text, docId }),
         });
         const forwarded = await forward.json().catch(() => null);
-        return res.json({ ok: true, intent, confidence: classification.confidence, result: forwarded ?? { message: 'RAG forwarding failed' } });
+
+        let audioBase64: string | null = null;
+        if (req.body.replyWithAudio && forwarded?.answer) {
+          audioBase64 = await generateSpeech(forwarded.answer);
+        }
+
+        return res.json({ ok: true, intent, confidence: classification.confidence, result: forwarded ?? { message: 'RAG forwarding failed' }, audioBase64 });
       } catch (err) {
         return res.status(500).json({ ok: false, message: 'Failed to forward to RAG endpoint', error: String(err) });
       }
