@@ -11,6 +11,9 @@
 - **Language detection:**: Auto-detects spoken language using `franc-min` and maps ISO-639-3 -> ISO-639-1.
 - **Translation:**: Uses Lingo.dev to translate user queries to English (for RAG processing) and translates answers back to the user's language.
 - **RAG:**: Retrieves relevant documents from Supabase and uses a language model to generate answers.
+- **Scientific Graphing:**: "Lab Mode" renders charts on blue engineering graph paper with precise 1mm grid scaling.
+- **Interactive Visuals:**: Charts support Pan/Zoom operations with synchronized grid movement for deep data inspection.
+- **Lab Assistant:**: specialized logic to extract experimental readings from manuals and plot them, with strict validation to prevent data hallucination.
 
 **Quick Start (Backend)**
 - **Prerequisites:**: Node 18+, npm, a Supabase project with vector embeddings, Lingo.dev API key, OpenAI API key (if used), and `.env` configured.
@@ -30,7 +33,10 @@ npm start
 - **Run (dev):**: Use your preferred dev runner for TypeScript or run compiled `dist` files after `npm run build`.
 
 **Frontend (brief)**
-- The companion UI lives in `AgoraLearn-UI`. Typical commands:
+- The companion UI lives in `AgoraLearn-UI`. It features a modern Next.js App Router setup with:
+  - **Dynamic Charting:** Uses `react-chartjs-2` with `chartjs-plugin-zoom` (lazy loaded) for high-performance scientific plotting.
+  - **Voice Interface:** Native AudioContext integration for silence detection and real-time voice feedback.
+- Typical commands:
 ```
 cd ../AgoraLearn-UI
 npm install

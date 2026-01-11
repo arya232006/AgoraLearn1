@@ -6,11 +6,15 @@ import { extractTablesFromText } from './utils/text-table-extract';
 import { supabase } from '../lib/supabase';
 import { tableToChart } from './utils/table-to-chart';
 import { generateSpeech } from './utils/tts-utils';
+import { generateLabReport } from '../lib/lab-assistant';
+
+import { generateChartWithGemini } from './utils/gemini-chart';
 
 const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
 - "summarize" (user wants a document summary / key points)
 - "table_qa" (user asks about tables in the document or "help with tables")
 - "chart_analysis" (user asks about charts, graphs, trends)
+- "lab_assistant" (user provides experimental readings/data and asks for calculation, graph plotting, or lab report)
 - "rag_query" (regular document QA / retrieval)
 
 Return ONLY a JSON object (no extra text) like:
@@ -42,9 +46,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const low = text.toLowerCase();
       if (low.includes('summar') || low.includes('key point') || low.includes('summary')) classification.intent = 'summarize';
       else if (low.includes('table') || low.includes('rows') || low.includes('columns')) classification.intent = 'table_qa';
-      else if (low.includes('chart') || low.includes('graph') || low.includes('trend')) classification.intent = 'chart_analysis';
+      // REMOVED 'chart'/'graph'/'plot' from here to allow RAG pipeline to handle context first, 
+      // then trigger Hybrid Graph Generation.
+      // else if (low.includes('chart') || low.includes('graph') || low.includes('trend')) classification.intent = 'chart_analysis';
+      // else if (low.includes('plot') || low.includes('reading') || low.includes('data') || low.includes('experiment')) classification.intent = 'lab_assistant';
       else classification.intent = 'rag_query';
       classification.confidence = 0.6;
+    }
+
+    // Capture the raw intent before we potentially override it for RAG context
+    const initialIntent = classification.intent;
+
+    // Force 'rag_query' for generic plot requests so they get context first
+    if ((classification.intent === 'chart_analysis' || classification.intent === 'lab_assistant') && !text.includes('Vars:')) {
+         classification.intent = 'rag_query';
     }
 
     const intent = classification.intent || 'rag_query';
@@ -142,6 +157,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No chart image attached. Please upload or capture the chart image or provide table text selection.' } });
     }
 
+    if (intent === 'lab_assistant') {
+      let userReadings = text; 
+
+      // Support "Data Ingestion" via Image Upload (Handwritten tables/screenshots)
+      if (imageBase64) {
+          try {
+             console.log("[Lab Assistant] Extracting data from attached image...");
+             const rawBase64 = (imageBase64 as string).replace(/^data:[^;]+;base64,/, '');
+             const buffer = Buffer.from(rawBase64, 'base64');
+             const extraction = await extractTablesFromImage(buffer, mimeType || 'image/png');
+             if (extraction && extraction.parsed) {
+                 userReadings += `\n\n[USER ATTACHED DATA IMAGE CONTENT]:\n${JSON.stringify(extraction.parsed, null, 2)}`;
+             }
+          } catch(e) {
+             console.warn("[Lab Assistant] Failed to extract data from image:", e);
+          }
+      }
+
+      let manualContext = (reference && String(reference).trim()) || (docText && String(docText).trim()) || null;
+
+      // If no manual text passed directly, try to fetch chunks
+      if (!manualContext && docId) {
+        try {
+          const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', docId);
+          if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
+            manualContext = chunkRows.map((r: any) => r.text).join('\n').substring(0, 15000);
+          }
+        } catch (e) {
+          console.warn('Failed to fetch chunks for Lab Assistant', docId, String(e));
+        }
+      }
+
+      const report = await generateLabReport(manualContext || '', userReadings); // text is the user's readings/prompt
+      
+      // Safety Check: If the report indicates missing data, ensure we don't pass a graphConfig by accident
+      if (report && report.missing_data) {
+          return res.json({ 
+              ok: true, 
+              intent, 
+              confidence: classification.confidence, 
+              result: { 
+                  // Strip graphConfig if it exists
+                  conclusion: report.conclusion || "I need experimental data to proceed.",
+                  graphConfig: null
+              } 
+          });
+      }
+
+      return res.json({ ok: true, intent, confidence: classification.confidence, result: report });
+    }
+
     // default: RAG query (forward to existing RAG endpoint)
     if (intent === 'rag_query') {
       if (!docId) return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No docId provided. Please ingest the document first or provide docId.' } });
@@ -154,12 +220,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         const forwarded = await forward.json().catch(() => null);
 
+        // --- HYBRID GENERATION: If user asks for Plot/Graph, call Gemini ---
+        let chartConfig: any = null;
+        let finalIntent = intent;
+        
+        const lowerQ = text.toLowerCase();
+        // Check for Intent OR Keywords (covering multi-lingual cases via LLM classification)
+        const isPlotRequest = 
+             (initialIntent === 'chart_analysis' || initialIntent === 'lab_assistant') ||
+             (lowerQ.includes("plot") || lowerQ.includes("graph") || lowerQ.includes("chart"));
+
+        if (isPlotRequest && forwarded?.answer) {
+             console.log("[Handle Query] Attempting Hybrid Chart Generation...");
+             // Combine query + retrieved answer context for Gemini to see data
+             // IMPORTANT: Include 'chunks' from RAG if available, as they contain the raw numbers
+             const ragContext = forwarded.chunks ? forwarded.chunks.map((c: any) => c.text).join('\n\n') : '';
+             const hybridContext = `User Query: ${text}\n\nAI Analysis/Answer: ${forwarded.answer}\n\nRetrieved Document Content:\n${ragContext}`;
+             
+             chartConfig = await generateChartWithGemini(hybridContext, text);
+             console.log("[Handle Query] Chart Config Result:", chartConfig ? "Success" : "Failed");
+
+             if (chartConfig && !chartConfig.missing_data) {
+                 finalIntent = "lab_assistant"; // Switch intent so frontend renders the chart
+             } else {
+                 chartConfig = null; // Discard invalid config
+             }
+        }
+        // ------------------------------------------------------------------
+
         let audioBase64: string | null = null;
         if (req.body.replyWithAudio && forwarded?.answer) {
           audioBase64 = await generateSpeech(forwarded.answer);
         }
 
-        return res.json({ ok: true, intent, confidence: classification.confidence, result: forwarded ?? { message: 'RAG forwarding failed' }, audioBase64 });
+        const resultPayload = forwarded ?? { message: 'RAG forwarding failed' };
+        
+        // If we generated a chart, merge it into the result
+        if (chartConfig) {
+             resultPayload.graphConfig = chartConfig;
+             resultPayload.calculations = { summary: "Analysis provided in text response." }; // Dummy calc object for frontend compatibility
+             resultPayload.conclusion = forwarded.answer; // Use the RAG answer as the conclusion/text body
+        }
+
+        return res.json({ ok: true, intent: finalIntent, confidence: classification.confidence, result: resultPayload, audioBase64 });
       } catch (err) {
         return res.status(500).json({ ok: false, message: 'Failed to forward to RAG endpoint', error: String(err) });
       }

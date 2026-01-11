@@ -2,6 +2,15 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Busboy from 'busboy';
 import mammoth from 'mammoth';
 import { randomUUID } from 'crypto';
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+};
+
 import { chunkText } from '../lib/chunk';
 import { embedText } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';

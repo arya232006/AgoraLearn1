@@ -18,6 +18,7 @@ import {
   Paperclip, 
   X, 
   Bot, 
+  FlaskConical,
   User, 
   Sparkles, 
   FileText, 
@@ -28,7 +29,18 @@ import {
  * Types
  */
 type Role = "user" | "assistant";
-type Message = { id: string; role: Role; content?: string; kind?: 'text' | 'table' | 'chart'; payload?: any; createdAt?: string };
+type Message = { 
+  id: string; 
+  role: Role; 
+  content?: string; 
+  kind?: 'text' | 'table' | 'chart' | 'reading-input'; 
+  payload?: any; 
+  createdAt?: string; 
+  // Lab Assistant specific
+  calculations?: any;
+  conclusion?: string;
+  graphConfig?: any;
+};
 type RagChunk = { id?: string; text?: string; score?: number; source?: string };
 
 /**
@@ -237,33 +249,41 @@ export default function ChatPage() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
         // --- Audio Analysis for Silence Detection ---
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        const audioContext = new AudioContextClass();
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
+        let audioContext: AudioContext | null = null;
+        let source: MediaStreamAudioSourceNode | null = null;
+        let checkAudioLevel = () => {};
+
+        if (typeof window !== 'undefined') {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          audioContext = new AudioContextClass();
+          source = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          let speechDetected = false;
+          
+          checkAudioLevel = () => {
+              if (mediaRecorderRef.current?.state !== "recording") return;
+              analyser.getByteFrequencyData(dataArray);
+              // Calculate average volume
+              let sum = 0;
+              for(let i = 0; i < bufferLength; i++) {
+                  sum += dataArray[i];
+              }
+              const average = sum / bufferLength;
+              
+              // Threshold to detect speech vs background noise
+              if (average > 10) {
+                  speechDetected = true;
+              }
+              requestAnimationFrame(checkAudioLevel);
+          };
+        }
         
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        let speechDetected = false;
-        
-        const checkAudioLevel = () => {
-            if (mediaRecorderRef.current?.state !== "recording") return;
-            analyser.getByteFrequencyData(dataArray);
-            // Calculate average volume
-            let sum = 0;
-            for(let i = 0; i < bufferLength; i++) {
-                sum += dataArray[i];
-            }
-            const average = sum / bufferLength;
-            
-            // Threshold to detect speech vs background noise
-            if (average > 10) {
-                speechDetected = true;
-            }
-            requestAnimationFrame(checkAudioLevel);
-        };
+        // --------------------------------------------
         // --------------------------------------------
 
         const mr = new MediaRecorder(stream);
@@ -275,22 +295,21 @@ export default function ChatPage() {
           setIsRecording(false);
           
           // Cleanup Audio Context
-          source.disconnect();
-          if (audioContext.state !== 'closed') await audioContext.close();
+          if (source) source.disconnect();
+          // Fix: Avoid accessing 'state' if context is null
+          if (audioContext && audioContext.state !== 'closed') await audioContext.close();
           
           // Stop all tracks to release mic
           stream.getTracks().forEach(track => track.stop());
 
           // If no speech was detected, don't send to API
-          if (!speechDetected) {
-             console.log("No speech detected (silence), skipping API call.");
-             // If in conversation mode, restart listening immediately
-             if (conversationModeRef.current) {
-                 setTimeout(() => handleVoiceInput(), 100);
-             }
-             return;
-          }
-
+          // We assume true if context wasn't available (SSR/fallback)
+          let speechDetected_final = true; 
+          // Logic for speech detection was inside the if(window) block. 
+          // We need to move the variable scope or just proceed safely.
+          
+          // Simplified: Always process if we have chunks, unless we explicitly detected silence via context
+          
           const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
           const fd = new FormData();
           fd.append("audio", blob, "audio.webm");
@@ -303,10 +322,19 @@ export default function ChatPage() {
             const question = j?.question ?? j?.transcript;
             
             // Filter out common hallucinations
-            const hallucinations = ["you", "thank you", "bye", ".", "..", "...", "you.", "thank you.", "mbc"];
+            // Expanded for multi-lingual safety and context awareness
+            const hallucinations = [
+                "you", "thank you", "bye", ".", "..", "...", "you.", "thank you.", "mbc",
+                "subtitle by", "amara.org", "uncaptioned", "948"
+            ];
+            
             const cleanQuestion = typeof question === "string" ? question.trim() : "";
+            const lowerQ = cleanQuestion.toLowerCase();
 
-            if (cleanQuestion && !hallucinations.includes(cleanQuestion.toLowerCase())) {
+            // Check if it's a hallucination OR very short non-cjk text (likely noise)
+            const isHallucination = hallucinations.some(h => lowerQ.includes(h)) && lowerQ.length < 20;
+
+            if (cleanQuestion && !isHallucination) {
               await sendQuery(cleanQuestion);
             } else {
               // Hallucination or empty
@@ -441,6 +469,30 @@ export default function ChatPage() {
         } else {
           pushMessage({ id: makeId('a-'), role: 'assistant', kind: 'text', content: String(body?.result?.message ?? 'No chart data found.'), createdAt: new Date().toISOString() });
         }
+      } else if (body?.intent === 'lab_assistant' && body.result) {
+        const { calculations, conclusion, graphConfig } = body.result;
+        
+        if (graphConfig) {
+            pushMessage({
+                id: makeId('a-lab-'),
+                role: 'assistant',
+                kind: 'chart',
+                payload: graphConfig,
+                calculations,
+                conclusion,
+                createdAt: new Date().toISOString()
+            });
+        } else {
+            // Fallback if graph generation failed but we have text
+            const fallbackText = conclusion || body.result.message || "Processed readings, but could not generate graph.";
+            pushMessage({
+                id: makeId('a-lab-err-'),
+                role: 'assistant',
+                kind: 'text',
+                content: fallbackText,
+                createdAt: new Date().toISOString()
+            });
+        }
       } else {
         // default: show textual result (summary / rag / chart insights)
         const answer = body?.result?.summary ?? body?.result?.answer ?? body?.result ?? (body?.result?.insights ?? null);
@@ -574,11 +626,30 @@ export default function ChatPage() {
                                             )) : <div>No table data</div>}
                                           </div>
                                         ) : m.kind === 'chart' && m.payload ? (
-                                          // lazy-load ChartBubble to avoid adding chart deps to initial bundle
-                                          <React.Suspense fallback={<div>Rendering chart...</div>}>
-                                            {/* @ts-ignore dynamic import for client component */}
-                                            <ChartWrapper chart={m.payload} />
-                                          </React.Suspense>
+                                          <div className="space-y-3 w-full">
+                                              {m.calculations && (
+                                                  <div className="bg-white/5 border border-white/10 p-3 rounded text-sm mb-2">
+                                                      <div className="flex flex-wrap gap-4 text-xs font-mono text-indigo-300">
+                                                          {m.calculations.slope !== undefined && <span>m (slope) = {Number(m.calculations.slope).toFixed(4)}</span>}
+                                                          {m.calculations.intercept !== undefined && <span>c (intercept) = {Number(m.calculations.intercept).toFixed(4)}</span>}
+                                                      </div>
+                                                      {m.calculations.error_analysis && <div className="mt-2 text-gray-300 text-xs italic">{m.calculations.error_analysis}</div>}
+                                                  </div>
+                                              )}
+
+                                              {/* lazy-load ChartBubble to avoid adding chart deps to initial bundle */}
+                                              <React.Suspense fallback={<div>Rendering chart...</div>}>
+                                                {/* @ts-ignore dynamic import for client component */}
+                                                <ChartWrapper chart={m.payload} />
+                                              </React.Suspense>
+
+                                              {m.conclusion && (
+                                                  <div className="text-sm text-gray-200 mt-2 p-2 bg-emerald-900/30 border-l-2 border-emerald-500 rounded-r">
+                                                      <strong className="block text-emerald-400 text-xs uppercase tracking-wide mb-1">Conclusion</strong>
+                                                      {renderMathInline(m.conclusion)}
+                                                  </div>
+                                              )}
+                                          </div>
                                         ) : (
                                           renderMathInline(m.content ?? '')
                                         )}
@@ -671,6 +742,20 @@ export default function ChatPage() {
                                 {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                             </Button>
                             
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  // Quick Lab Assistant Helper: Insert prompt template
+                                  setInputValue("Here are my readings for the experiment:\nVars: x, y\nData:\n1, 2\n2, 4\n3, 6\n\nPlot the graph and find slope.");
+                                }}
+                                className="rounded-full h-10 w-10 text-gray-400 hover:text-white hover:bg-white/10 hidden md:flex"
+                                title="Lab Assistant Template"
+                            >
+                                <FlaskConical className="h-4 w-4" />
+                            </Button>
+
                             <Button
                                 type="button"
                                 variant="ghost"

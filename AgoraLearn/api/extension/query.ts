@@ -16,14 +16,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { query, docId, conversationId, reference } = req.body ?? {};
+    const { query, docId, conversationId, reference, replyWithAudio } = req.body ?? {};
     if (!query || typeof query !== 'string') return res.status(400).json({ error: "Missing 'query'" });
 
-    // Proxy to existing converse endpoint
-    const r = await fetch(`${SERVER_BASE}/api/converse`, {
+    // Proxy to unified handle-query endpoint
+    const r = await fetch(`${SERVER_BASE}/api/handle-query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, docId, conversationId, reference }),
+      body: JSON.stringify({ 
+        text: query, // map query -> text
+        docId, 
+        conversationId, 
+        reference,
+        replyWithAudio 
+      }),
     });
 
     const body = await r.text();

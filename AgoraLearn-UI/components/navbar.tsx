@@ -1,42 +1,46 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { Menu, Sparkles } from "lucide-react"
+import { useAuthState } from 'react-firebase-hooks/auth'
+import { signOut } from 'firebase/auth'
+import { auth } from '../app/firebase'
+
 import { Button } from "@components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@components/ui/dropdown-menu"
+import { Sheet, SheetContent, SheetTrigger } from "@components/ui/sheet"
 import { Avatar, AvatarImage, AvatarFallback } from "@components/ui/avatar"
-import DarkVeil from '@components/ui/DarkVeil';
-import { useEffect, useState } from 'react'
-import { auth } from '../app/firebase'
-import { useAuthState } from 'react-firebase-hooks/auth'
-import { signOut } from 'firebase/auth'
+import DarkVeil from '@components/ui/DarkVeil'
 
 export default function Navbar() {
   const pathname = usePathname()
-  const [user, loading, error] = useAuthState(auth);
+  const [user] = useAuthState(auth)
+  const [isOpen, setIsOpen] = React.useState(false)
 
-  // Mock user data (fallback)
   const mockUser = {
-    name: "John Doe",
-    email: "john@example.com",
-    image: "/placeholder-user.jpg",
+    name: "Guest User",
+    email: "guest@example.com",
+    image: "",
   }
 
   const displayUser = user ? {
-    name: user.displayName || user.email || mockUser.name,
+    name: user.displayName || user.email?.split('@')[0] || mockUser.name,
     email: user.email || mockUser.email,
     image: user.photoURL || mockUser.image
-  } : null;
+  } : mockUser
 
   const handleSignOut = async () => {
-    await signOut(auth);
-  };
+    await signOut(auth)
+  }
 
   const navItems = [
     { name: "Dashboard", href: "/dashboard" },
@@ -44,58 +48,117 @@ export default function Navbar() {
   ]
 
   return (
-    <nav className="border-b border-border sticky top-0 z-50 relative min-h-[64px]">
-      {/* DarkVeil animated background for navbar */}
-      <div className="absolute inset-0 -z-10 h-full w-full">
-        <DarkVeil resolutionScale={1} />
-      </div>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <Link href="/dashboard" className="font-bold text-xl text-white">
-            AgoraLearn
+    <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/20 backdrop-blur-xl supports-[backdrop-filter]:bg-black/20">
+       {/* Subtle animated background behind navbar */}
+       <div className="absolute inset-0 -z-10 h-full w-full overflow-hidden opacity-50">
+          <DarkVeil resolutionScale={0.5} />
+       </div>
+
+      <div className="container flex h-16 items-center justify-between px-4 md:px-8 mx-auto">
+        {/* Mobile Menu */}
+        <div className="flex items-center md:hidden">
+          <Sheet open={isOpen} onOpenChange={setIsOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="mr-2 text-white hover:bg-white/10">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Toggle menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="bg-black/95 border-r-white/10 text-white">
+              <div className="flex flex-col space-y-4 mt-8">
+                <Link href="/dashboard" className="flex items-center gap-2 font-bold text-xl" onClick={() => setIsOpen(false)}>
+                  <Sparkles className="h-5 w-5 text-purple-400" />
+                  <span>AgoraLearn</span>
+                </Link>
+                <div className="flex flex-col space-y-2">
+                  {navItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setIsOpen(false)}
+                      className={`px-4 py-2 rounded-md text-sm font-medium transition-colors
+                        ${pathname === item.href
+                          ? "bg-white/10 text-white"
+                          : "text-white/60 hover:text-white hover:bg-white/5"}
+                      `}
+                    >
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+          
+          {/* Mobile Logo */}
+          <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg text-white">
+             <Sparkles className="h-5 w-5 text-purple-400" />
+             <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">AgoraLearn</span>
+          </Link>
+        </div>
+
+        {/* Desktop Logo */}
+        <div className="hidden md:flex items-center gap-6">
+          <Link href="/dashboard" className="flex items-center gap-2 font-bold text-xl text-white mr-4">
+            <div className="p-1.5 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 shadow-lg shadow-purple-500/20">
+               <Sparkles className="h-4 w-4 text-white" />
+            </div>
+            <span className="bg-gradient-to-r from-white via-purple-100 to-white/70 bg-clip-text text-transparent">AgoraLearn</span>
           </Link>
 
-          {/* Nav Items */}
-          <div className="hidden md:flex items-center gap-1">
+          {/* Desktop Nav */}
+          <nav className="flex items-center gap-1">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors border border-black glare-hover
+                className={`relative px-4 py-2 rounded-full text-sm font-medium transition-all duration-200
                   ${pathname === item.href
-                    ? "bg-white text-black shadow"
-                    : "bg-black text-white hover:bg-white hover:text-black"}
+                    ? "text-white bg-white/10 shadow-[0_0_15px_rgba(255,255,255,0.1)] border border-white/10"
+                    : "text-white/60 hover:text-white hover:bg-white/5 border border-transparent"}
                 `}
               >
                 {item.name}
               </Link>
             ))}
-          </div>
+          </nav>
+        </div>
 
-          {/* User Menu */}
+        {/* User Menu */}
+        <div className="flex items-center gap-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                <Avatar>
-                  <AvatarImage src={(displayUser || mockUser).image || "/placeholder.svg"} alt={(displayUser || mockUser).name} />
-                  <AvatarFallback>{((displayUser || mockUser).name || "?").charAt(0).toUpperCase()}</AvatarFallback>
+              <Button variant="ghost" className="relative h-9 w-9 rounded-full ring-2 ring-white/10 hover:ring-white/30 transition-all">
+                <Avatar className="h-9 w-9">
+                  <AvatarImage src={displayUser.image || "/placeholder.svg"} alt={displayUser.name} />
+                  <AvatarFallback className="bg-gradient-to-br from-purple-600 to-blue-600 text-white">
+                    {displayUser.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <div className="flex items-center space-x-2 p-2">
-                <div className="flex flex-col space-y-1 leading-none">
-                  <p className="font-medium">{(displayUser || mockUser).name}</p>
-                  <p className="w-[200px] truncate text-sm text-muted-foreground">{(displayUser || mockUser).email}</p>
+            <DropdownMenuContent align="end" className="w-56 bg-black/90 border-white/10 text-white backdrop-blur-xl">
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">{displayUser.name}</p>
+                  <p className="text-xs leading-none text-white/50">{displayUser.email}</p>
                 </div>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-white/10" />
+              <DropdownMenuItem className="focus:bg-white/10 focus:text-white cursor-pointer">
+                Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem className="focus:bg-white/10 focus:text-white cursor-pointer">
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-white/10" />
+              <DropdownMenuItem onClick={handleSignOut} className="text-red-400 focus:text-red-400 focus:bg-red-400/10 cursor-pointer">
+                Sign out
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
-    </nav>
+    </header>
   )
 }
