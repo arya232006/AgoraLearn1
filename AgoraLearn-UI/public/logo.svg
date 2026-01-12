@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="bg-grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#1F2937"/>
+<stop offset="1" stop-color="#0F172A"/>
+</linearGradient>
+<pattern id="grid-pattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+<path d="M 40 0 L 0 0 0 40" fill="none" stroke="#4169E1" stroke-opacity="0.15" stroke-width="2"/>
+</pattern>
+<filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+<feGaussianBlur stdDeviation="15" result="blur" />
+<feComposite in="SourceGraphic" in2="blur" operator="over" />
+</filter>
+</defs>
+
+<!-- Background Container -->
+<rect width="512" height="512" rx="128" fill="url(#bg-grad)"/>
+<rect width="512" height="512" rx="128" fill="url(#grid-pattern)"/>
+<rect x="0" y="0" width="512" height="512" rx="128" stroke="#4169E1" stroke-width="8" stroke-opacity="0.3"/>
+
+<!-- The "A" Frame -->
+<path d="M156 400L256 120L356 400" stroke="white" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+
+<!-- The Rising Graph Line (Crossing the A) -->
+<path d="M110 320 L190 320 L240 240 L300 290 L380 160" stroke="#4169E1" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+
+<!-- Data Points -->
+<circle cx="240" cy="240" r="12" fill="white"/>
+<circle cx="300" cy="290" r="12" fill="white"/>
+<circle cx="380" cy="160" r="24" fill="#00FFFF" filter="url(#glow)">
+  <animate attributeName="r" values="24;28;24" dur="2s" repeatCount="indefinite" />
+  <animate attributeName="opacity" values="1;0.8;1" dur="2s" repeatCount="indefinite" />
+</circle>
+
+</svg>

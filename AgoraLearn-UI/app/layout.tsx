@@ -10,7 +10,10 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "AgoraLearn",
   description: "Upload documents and ask AI-powered questions",
-    generator: 'v0.app'
+  generator: 'v0.app',
+  icons: {
+    icon: '/logo.svg',
+  }
 }
 
 export default function RootLayout({
