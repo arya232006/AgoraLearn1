@@ -10,6 +10,8 @@ import { fileURLToPath } from 'url';
 
 const app = express();
 app.use(cors());
+// Cloud Run populates PORT (usually 8080). We must listen on it.
+// We also bind to 0.0.0.0 explicitly to ensure we accept outside connections.
 const PORT = process.env.PORT || 3000;
 
 // Helper to import compiled handler
