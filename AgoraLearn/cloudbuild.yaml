@@ -1,0 +1,25 @@
+steps:
+  # 1. Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/agoralearn-backend:$COMMIT_SHA', '.']
+  
+  # 2. Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/agoralearn-backend:$COMMIT_SHA']
+  
+  # 3. Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'agoralearn-backend'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/agoralearn-backend:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+
+# Store images in Google Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/agoralearn-backend:$COMMIT_SHA'
