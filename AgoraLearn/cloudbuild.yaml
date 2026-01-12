@@ -1,6 +1,7 @@
 steps:
   # 1. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
+    dir: 'AgoraLearn'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/agoralearn-backend:$COMMIT_SHA', '.']
   
   # 2. Push the container image to Container Registry
