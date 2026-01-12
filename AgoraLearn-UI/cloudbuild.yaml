@@ -26,3 +26,6 @@ steps:
 # Store images in Google Container Registry
 images:
   - 'gcr.io/$PROJECT_ID/agoralearn-ui:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
