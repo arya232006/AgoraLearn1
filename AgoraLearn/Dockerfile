@@ -16,8 +16,11 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Expose port (Cloud Run sets PORT env var, defaults to 8080 usually)
-EXPOSE 8080
+# DEBUG: List the dist folder to ensure compilation worked
+RUN ls -R dist/
+
+# Expose port (Cloud Run sets PORT env var)
+EXPOSE 3000
 
 # Start server
 CMD ["npm", "start"]

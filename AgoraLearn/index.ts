@@ -47,6 +47,13 @@ app.get('/', (_req, res) => {
   res.send('AgoraLearn Express server is running!');
 });
 
+// Health check for Cloud Run
+app.get('/health', (_req, res) => {
+  res.status(200).send('OK');
+});
+
 app.listen(PORT, () => {
+  console.log(`Server starting...`);
   console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV}`);
 });
