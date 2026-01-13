@@ -46,6 +46,51 @@ type RagChunk = { id?: string; text?: string; score?: number; source?: string };
 /**
  * Helpers
  */
+// Auto-calculate slope/intercept on frontend
+function calculateRegression(data: any) {
+  // If data is the whole chart object, extract series
+  let points: {x:number, y:number}[] = [];
+  
+  if (Array.isArray(data)) {
+      points = data.map((d:any) => ({x: Number(d.x||d.X||d[0]), y: Number(d.y||d.Y||d[1])}));
+  } else if (data && data.data && data.data.datasets && data.data.datasets[0]) {
+      // standard chartjs structure
+      const ds = data.data.datasets[0].data;
+      if (Array.isArray(ds)) {
+           points = ds.map((d:any) => {
+               if(typeof d === 'number') return {x: NaN, y: d}; // Cant do regression without x
+               return {x: Number(d.x), y: Number(d.y)};
+           });
+           // If X comes from labels
+           if(data.data.labels && points.every(p => isNaN(p.x))) {
+               points = points.map((p, i) => ({x: Number(data.data.labels[i]), y: p.y}));
+           }
+      }
+  } else if (data && Array.isArray(data.series) && data.series[0]) {
+       points = data.series[0].points.map((p:any) => ({x: Number(p.x), y: Number(p.y)}));
+  }
+
+  // Filter valid
+  points = points.filter(p => !isNaN(p.x) && !isNaN(p.y));
+
+  if (points.length < 2) return null;
+
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0;
+  for (const p of points) {
+      sx += p.x; sy += p.y;
+      sxy += p.x * p.y; sxx += p.x * p.x;
+      n++;
+  }
+  
+  const denom = (n * sxx - sx * sx);
+  if (Math.abs(denom) < 1e-9) return null; // Vertical line
+
+  const slope = (n * sxy - sx * sy) / denom;
+  const intercept = (sy - slope * sx) / n;
+  
+  return { slope, intercept };
+}
+
 function makeId(prefix = "") {
   try {
     return prefix + (crypto as any).randomUUID();
@@ -627,15 +672,28 @@ export default function ChatPage() {
                                           </div>
                                         ) : m.kind === 'chart' && m.payload ? (
                                           <div className="space-y-3 w-full">
-                                              {m.calculations && (
+                                            {(() => {
+                                                // Try to get calculations from message, OR calculate on the fly
+                                                const stats = m.calculations || calculateRegression(m.payload);
+                                                
+                                                if (!stats) return null;
+                                                
+                                                return (
                                                   <div className="bg-white/5 border border-white/10 p-3 rounded text-sm mb-2">
                                                       <div className="flex flex-wrap gap-4 text-xs font-mono text-indigo-300">
-                                                          {m.calculations.slope !== undefined && <span>m (slope) = {Number(m.calculations.slope).toFixed(4)}</span>}
-                                                          {m.calculations.intercept !== undefined && <span>c (intercept) = {Number(m.calculations.intercept).toFixed(4)}</span>}
+                                                          <span>m (slope) = {Number(stats.slope).toFixed(4)}</span>
+                                                          <span>c (intercept) = {Number(stats.intercept).toFixed(4)}</span>
                                                       </div>
-                                                      {m.calculations.error_analysis && <div className="mt-2 text-gray-300 text-xs italic">{m.calculations.error_analysis}</div>}
+                                                       {/* Only show equation if we just calculated it */}
+                                                      {!m.calculations && (
+                                                        <div className="mt-1 text-xs text-gray-500">
+                                                            Eq: y = {Number(stats.slope).toFixed(2)}x + {Number(stats.intercept).toFixed(2)}
+                                                        </div>
+                                                      )}
+                                                      {stats.error_analysis && <div className="mt-2 text-gray-300 text-xs italic">{stats.error_analysis}</div>}
                                                   </div>
-                                              )}
+                                                );
+                                            })()}
 
                                               {/* lazy-load ChartBubble to avoid adding chart deps to initial bundle */}
                                               <React.Suspense fallback={<div>Rendering chart...</div>}>
