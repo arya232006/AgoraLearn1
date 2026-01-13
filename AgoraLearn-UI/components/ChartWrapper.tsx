@@ -7,12 +7,57 @@ import { Line, Bar, Pie } from 'react-chartjs-2';
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend);
 
 /* 
-   Graph Paper Plugin
-   Draws intermediate subdivisions between major ticks to ensure:
-   1. Alignment with actual data (unlike CSS background)
-   2. "Small squares" visual effect (mm/cm feel)
-   3. Equal spacing regardless of screen pixel rounding
+   Error Bars Plugin
+   Draws error bars if data points have 'error' or 'yError' property.
 */
+const errorBarsPlugin = {
+  id: 'errorBars',
+  afterDatasetsDraw: (chart: any) => {
+    const { ctx } = chart;
+    chart.data.datasets.forEach((dataset: any, i: number) => {
+      const meta = chart.getDatasetMeta(i);
+      if (meta.hidden) return;
+      
+      meta.data.forEach((element: any, index: number) => {
+        const datum = dataset.data[index];
+        // Check for error property
+        const error = datum?.error ?? datum?.yError;
+        if (!error) return;
+
+        const { x, y } = element.getProps(['x', 'y'], true);
+        const yScale = chart.scales.y;
+        
+        // Value might be in raw data (datum.y) or implied
+        const yVal = datum.y !== undefined ? datum.y : datum;
+        
+        const yHigh = yScale.getPixelForValue(yVal + error);
+        const yLow = yScale.getPixelForValue(yVal - error);
+
+        ctx.save();
+        ctx.strokeStyle = dataset.borderColor || 'rgba(255,255,255,0.8)';
+        ctx.fillStyle = dataset.borderColor || 'rgba(255,255,255,0.8)';
+        ctx.lineWidth = 1.5;
+        
+        // Vertical line
+        ctx.beginPath();
+        ctx.moveTo(x, yLow);
+        ctx.lineTo(x, yHigh);
+        ctx.stroke();
+        
+        // Caps
+        ctx.beginPath();
+        ctx.moveTo(x - 4, yLow);
+        ctx.lineTo(x + 4, yLow);
+        ctx.moveTo(x - 4, yHigh);
+        ctx.lineTo(x + 4, yHigh);
+        ctx.stroke();
+        
+        ctx.restore();
+      });
+    });
+  }
+};
+
 const graphPaperPlugin = {
   id: 'graphPaperPlugin',
   beforeDraw: (chart: any, args: any, options: any) => {
@@ -315,10 +360,10 @@ export default function ChartWrapper({ chart }: { chart: any }) {
             <ModeToggle />
          </div>
          <div style={{ position: 'relative', height: '400px', width: '100%', cursor: 'move' }}>
-            {chartType === 'line' ? <Line ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin]} /> :
-            chartType === 'bar' ? <Bar ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin]} /> :
+            {chartType === 'line' ? <Line ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin, errorBarsPlugin]} /> :
+            chartType === 'bar' ? <Bar ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin, errorBarsPlugin]} /> :
             chartType === 'pie' ? <Pie ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin]} /> :
-            <Line ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin]} />}
+            <Line ref={chartRef} data={data} options={options} plugins={[graphPaperPlugin, errorBarsPlugin]} />}
          </div>
       </div>
     );
@@ -341,8 +386,13 @@ export default function ChartWrapper({ chart }: { chart: any }) {
   const labels = series.length > 0 ? series[0].points.map((p) => String(p.x)) : [];
   const datasets = series.map((s, i) => {
     const data = s.points.map((p) => {
-      const n = typeof p.y === 'number' ? p.y : (p.y == null ? NaN : Number(p.y));
-      return Number.isFinite(n) ? n : NaN;
+      let y = typeof p.y === 'number' ? p.y : (p.y == null ? NaN : Number(p.y));
+      y = Number.isFinite(y) ? y : NaN;
+      // If error data exists, return object structure
+      if (p.error !== undefined || p.yError !== undefined) {
+         return { x: p.x, y, error: Number(p.error || p.yError) };
+      }
+      return y;
     });
     return {
       label: s.name || `series ${i + 1}`,
@@ -380,11 +430,11 @@ export default function ChartWrapper({ chart }: { chart: any }) {
       </div>
       <div style={{ position: 'relative', height: '100%', minHeight: '400px', cursor: 'move' }}>
       {chartType === 'bar' ? (
-        <Bar ref={chartRef} data={{ labels, datasets }} options={commonOpts} plugins={[graphPaperPlugin]} />
+        <Bar ref={chartRef} data={{ labels, datasets }} options={commonOpts} plugins={[graphPaperPlugin, errorBarsPlugin]} />
       ) : chartType === 'pie' || chartType === 'doughnut' ? (
         <Pie ref={chartRef} data={{ labels, datasets }} options={commonOpts} plugins={[graphPaperPlugin]} />
       ) : (
-        <Line ref={chartRef} data={{ labels, datasets }} options={commonOpts} plugins={[graphPaperPlugin]} />
+        <Line ref={chartRef} data={{ labels, datasets }} options={commonOpts} plugins={[graphPaperPlugin, errorBarsPlugin]} />
       )}
       </div>
       {chart.insights && <div style={{ marginTop: 8, fontSize: 13, color: gridMode === 'standard' ? '#eee' : '#333' }}>{chart.insights}</div>}

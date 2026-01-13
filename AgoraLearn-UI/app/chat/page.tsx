@@ -5,7 +5,11 @@ import { InlineMath, BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import DarkVeil from "@components/ui/DarkVeil";
 import Navbar from "@components/navbar";
-import ChartWrapper from "@components/ChartWrapper";
+import dynamic from 'next/dynamic';
+
+const ChartWrapper = dynamic(() => import('@components/ChartWrapper'), { ssr: false });
+const ThreeDWrapper = dynamic(() => import('@components/ThreeDWrapper'), { ssr: false });
+
 import { Button } from "@components/ui/button";
 import { Card, CardContent } from "@components/ui/card";
 import { Input } from "@components/ui/input";
@@ -33,7 +37,7 @@ type Message = {
   id: string; 
   role: Role; 
   content?: string; 
-  kind?: 'text' | 'table' | 'chart' | 'reading-input'; 
+  kind?: 'text' | 'table' | 'chart' | 'reading-input' | '3d'; 
   payload?: any; 
   createdAt?: string; 
   // Lab Assistant specific
@@ -46,7 +50,7 @@ type RagChunk = { id?: string; text?: string; score?: number; source?: string };
 /**
  * Helpers
  */
-// Auto-calculate slope/intercept on frontend
+// Auto-calculate slope/intercept/curve-fit on frontend
 function calculateRegression(data: any) {
   // If data is the whole chart object, extract series
   let points: {x:number, y:number}[] = [];
@@ -72,23 +76,86 @@ function calculateRegression(data: any) {
 
   // Filter valid
   points = points.filter(p => !isNaN(p.x) && !isNaN(p.y));
-
   if (points.length < 2) return null;
 
-  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0;
-  for (const p of points) {
-      sx += p.x; sy += p.y;
-      sxy += p.x * p.y; sxx += p.x * p.x;
-      n++;
-  }
-  
-  const denom = (n * sxx - sx * sx);
-  if (Math.abs(denom) < 1e-9) return null; // Vertical line
+  // --- Helpers ---
+  const getR2 = (predFn: (x:number)=>number) => {
+       const ys = points.map(p => p.y);
+       const yMean = ys.reduce((a,b)=>a+b,0)/ys.length;
+       const ssTot = ys.reduce((a,b)=>a+(b-yMean)**2,0);
+       const ssRes = points.reduce((a,p)=>a+(p.y-predFn(p.x))**2,0);
+       return ssTot === 0 ? 0 : 1 - (ssRes/ssTot);
+  };
 
-  const slope = (n * sxy - sx * sy) / denom;
-  const intercept = (sy - slope * sx) / n;
+  // 1. Linear (y = mx + c)
+  let linear = null;
+  {
+      let n=0, sx=0, sy=0, sxy=0, sxx=0;
+      for(const p of points){ sx+=p.x; sy+=p.y; sxy+=p.x*p.y; sxx+=p.x*p.x; n++; }
+      const den = n*sxx - sx*sx;
+      if(Math.abs(den) > 1e-9) {
+          const slope = (n*sxy - sx*sy)/den;
+          const intercept = (sy - slope*sx)/n;
+          const r2 = getR2(x => slope*x + intercept);
+          linear = { type: 'linear', slope, intercept, r2, equation: `y = ${slope.toFixed(4)}x + ${intercept.toFixed(4)}` };
+      }
+  }
+
+  // 2. Exponential (y = ae^bx) -> ln(y) = ln(a) + bx
+  let exponential = null;
+  const validExp = points.filter(p => p.y > 0);
+  if (validExp.length >= 2) {
+      let n=0, sx=0, sy=0, sxy=0, sxx=0;
+      for(const p of validExp){ 
+          const lx = p.x; const ly = Math.log(p.y);
+          sx+=lx; sy+=ly; sxy+=lx*ly; sxx+=lx*lx; n++; 
+      }
+      const den = n*sxx - sx*sx;
+      if(Math.abs(den) > 1e-9) {
+          const b = (n*sxy - sx*sy)/den;
+          const lnA = (sy - b*sx)/n;
+          const a = Math.exp(lnA);
+          const r2 = getR2(x => a * Math.exp(b*x));
+          exponential = { type: 'exponential', a, b, r2, equation: `y = ${a.toFixed(4)}e^{${b.toFixed(4)}x}` };
+      }
+  }
+
+  // 3. Polynomial (Quadratic: y = ax^2 + bx + c)
+  let polynomial = null;
+  if (points.length >= 3) {
+       let n=points.length, sx=0, sx2=0, sx3=0, sx4=0, sy=0, sxy=0, sx2y=0;
+       for(const p of points) {
+           const x = p.x; const y = p.y;
+           sx+=x; sx2+=x*x; sx3+=x**3; sx4+=x**4;
+           sy+=y; sxy+=x*y; sx2y+=x*x*y;
+       }
+       // Cramer's Rule for 3x3 to solve M * [c, b, a]^T = V
+       const M = [[n, sx, sx2], [sx, sx2, sx3], [sx2, sx3, sx4]];
+       const det = (m:number[][]) => 
+           m[0][0]*(m[1][1]*m[2][2]-m[2][1]*m[1][2]) -
+           m[0][1]*(m[1][0]*m[2][2]-m[2][0]*m[1][2]) +
+           m[0][2]*(m[1][0]*m[2][1]-m[2][0]*m[1][1]);
+       
+       const D = det(M);
+       if (Math.abs(D) > 1e-9) {
+           const Dc = det([[sy, sx, sx2], [sxy, sx2, sx3], [sx2y, sx3, sx4]]);
+           const Db = det([[n, sy, sx2], [sx, sxy, sx3], [sx2, sx2y, sx4]]);
+           const Da = det([[n, sx, sy], [sx, sx2, sxy], [sx2, sx3, sx2y]]);
+           
+           const c = Dc/D;
+           const b = Db/D;
+           const a = Da/D;
+           
+           const r2 = getR2(x => a*x*x + b*x + c);
+           polynomial = { type: 'polynomial', a, b, c, r2, equation: `y = ${a.toFixed(4)}x^2 + ${b.toFixed(4)}x + ${c.toFixed(4)}` };
+       }
+  }
+
+  // Select Best Fit
+  const models = [linear, exponential, polynomial].filter(m => m !== null) as any[];
+  models.sort((a, b) => b.r2 - a.r2); // Descending R2
   
-  return { slope, intercept };
+  return models[0] || null;
 }
 
 function makeId(prefix = "") {
@@ -538,6 +605,14 @@ export default function ChatPage() {
                 createdAt: new Date().toISOString()
             });
         }
+      } else if (body?.intent === '3d_viz' || body?.result?.kind === '3d') {
+        const payload = body.result.payload;
+         if (payload) {
+             pushMessage({ id: makeId('a-3d-'), role: 'assistant', kind: '3d', payload: payload, createdAt: new Date().toISOString() });
+         } else {
+             const fallback = body.result.message || "Could not generate 3D visualization.";
+             pushMessage({ id: makeId('a-err-'), role: 'assistant', kind: 'text', content: String(fallback), createdAt: new Date().toISOString() });
+         }
       } else {
         // default: show textual result (summary / rag / chart insights)
         const answer = body?.result?.summary ?? body?.result?.answer ?? body?.result ?? (body?.result?.insights ?? null);
@@ -680,14 +755,20 @@ export default function ChatPage() {
                                                 
                                                 return (
                                                   <div className="bg-white/5 border border-white/10 p-3 rounded text-sm mb-2">
-                                                      <div className="flex flex-wrap gap-4 text-xs font-mono text-indigo-300">
-                                                          <span>m (slope) = {Number(stats.slope).toFixed(4)}</span>
-                                                          <span>c (intercept) = {Number(stats.intercept).toFixed(4)}</span>
+                                                      <div className="flex flex-wrap gap-4 text-xs font-mono text-indigo-300 items-center">
+                                                          {stats.type === 'linear' && (
+                                                            <>
+                                                              <span>m = {Number(stats.slope).toFixed(3)}</span>
+                                                              <span>c = {Number(stats.intercept).toFixed(3)}</span>
+                                                            </>
+                                                          )}
+                                                          {stats.r2 !== undefined && <span>R² = {Number(stats.r2).toFixed(4)}</span>}
+                                                          <span className="uppercase text-[9px] bg-white/10 px-1.5 py-0.5 rounded text-gray-300">{stats.type} FIT</span>
                                                       </div>
                                                        {/* Only show equation if we just calculated it */}
-                                                      {!m.calculations && (
-                                                        <div className="mt-1 text-xs text-gray-500">
-                                                            Eq: y = {Number(stats.slope).toFixed(2)}x + {Number(stats.intercept).toFixed(2)}
+                                                      {!m.calculations && stats.equation && (
+                                                        <div className="mt-2 text-xs text-gray-400 font-mono">
+                                                            Eq: <InlineMath math={stats.equation.replace(/^y\s*=\s*/, '').trim()} />
                                                         </div>
                                                       )}
                                                       {stats.error_analysis && <div className="mt-2 text-gray-300 text-xs italic">{stats.error_analysis}</div>}
@@ -708,6 +789,15 @@ export default function ChatPage() {
                                                   </div>
                                               )}
                                           </div>
+                                        ) : m.kind === '3d' && m.payload ? (
+                                            <div className="space-y-3 w-full h-full min-h-[400px]">
+                                                <React.Suspense fallback={<div className="h-[400px] flex items-center justify-center bg-white/5 animate-pulse rounded">Loading 3D Engine...</div>}>
+                                                    <ThreeDWrapper data={m.payload} />
+                                                </React.Suspense>
+                                                <div className="text-xs text-gray-400 text-center italic">
+                                                    Interacting with 3D Ecosystem • {m.payload.type === 'molecule' ? 'Chemistry' : 'Physics'} Mode
+                                                </div>
+                                            </div>
                                         ) : (
                                           renderMathInline(m.content ?? '')
                                         )}

@@ -15,6 +15,7 @@ const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's reques
 - "table_qa" (user asks about tables in the document or "help with tables")
 - "chart_analysis" (user asks about charts, graphs, trends)
 - "lab_assistant" (user provides experimental readings/data and asks for calculation, graph plotting, or lab report)
+- "3d_viz" (user asks to visualize a molecule, chemical structure, vector field, or 3D concept)
 - "rag_query" (regular document QA / retrieval)
 
 Return ONLY a JSON object (no extra text) like:
@@ -45,6 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // fallback heuristics
       const low = text.toLowerCase();
       if (low.includes('summar') || low.includes('key point') || low.includes('summary')) classification.intent = 'summarize';
+      else if (low.includes('molecule') || low.includes('structure') || low.includes('3d') || low.includes('vector') || low.includes('visualize') || low.includes('projectil') || low.includes('simulation') || low.includes('throw') || low.includes('lens') || low.includes('optic') || low.includes('ray')) classification.intent = '3d_viz';
       else if (low.includes('table') || low.includes('rows') || low.includes('columns')) classification.intent = 'table_qa';
       // REMOVED 'chart'/'graph'/'plot' from here to allow RAG pipeline to handle context first, 
       // then trigger Hybrid Graph Generation.
@@ -157,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No chart image attached. Please upload or capture the chart image or provide table text selection.' } });
     }
 
-    if (intent === 'lab_assistant') {
+    if (intent === 'lab_assistant' || intent === '3d_viz') {
       let userReadings = text; 
 
       // Support "Data Ingestion" via Image Upload (Handwritten tables/screenshots)
