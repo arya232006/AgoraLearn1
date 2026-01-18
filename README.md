@@ -1,19 +1,20 @@
 <img width="2559" height="1356" alt="image" src="https://github.com/user-attachments/assets/71df90d5-b163-4032-9619-8a1612b53728" />
 <img width="2524" height="1314" alt="image" src="https://github.com/user-attachments/assets/13c21255-7b60-42ee-b77a-54f51127b272" />
 
-**AgoraLearn — Multilingual RAG + Voice Assistant**
+**AgoraLearn — Scientific AI Assistant (Multilingual & Interactive)**
 
-- **Project:**: Backend for a voice-enabled, multilingual RAG (Retrieval-Augmented Generation) assistant.
-- **Stack:**: Node.js, TypeScript, Express, Supabase (vector store), OpenAI (Whisper/LLMs), `franc-min` for language detection, Lingo.dev for translations.
+- **Project:**: A comprehensive scientific learning platform combining RAG, Physics Simulations, and Lab Analysis.
+- **Stack:**: 
+  - **Core**: Node.js, TypeScript, Next.js 14 (App Router).
+  - **AI**: Gemini 2.0 Flash (Reasoning/Vision), OpenAI Whisper (Voice), Lingo.dev (Translation), Supabase (Vector Store).
+  - **Visualization**: React Three Fiber (3D), Chart.js (2D Analysis), Recharts.
 
 **Features**
-- **Voice transcription:**: Upload audio to `POST /api/voice-query` (multipart/form-data) and receive a transcribed question and answer.
-- **Language detection:**: Auto-detects spoken language using `franc-min` and maps ISO-639-3 -> ISO-639-1.
-- **Translation:**: Uses Lingo.dev to translate user queries to English (for RAG processing) and translates answers back to the user's language.
-- **RAG:**: Retrieves relevant documents from Supabase and uses a language model to generate answers.
-- **Scientific Graphing:**: "Lab Mode" renders charts on blue engineering graph paper with precise 1mm grid scaling.
-- **Interactive Visuals:**: Charts support Pan/Zoom operations with synchronized grid movement for deep data inspection.
-- **Lab Assistant:**: specialized logic to extract experimental readings from manuals and plot them, with strict validation to prevent data hallucination.
+- **🔬 Interactive Physics Simulations**: Real-time 3D simulations for Projectile Motion, Optics (Ray Tracing), Molecular Structures, and Vector Fields.
+- **📈 Advanced Lab Assistant**: Parses experimental data to generate error-bar plots, performs Polynomial/Exponential regression, and writes formal lab conclusions.
+- **🗣️ Multilingual Voice Interaction**: Speak in 30+ languages; the system auto-detects, translates, and responds in your native tongue.
+- **📚 RAG & Document QA**: Context-aware answers from uploaded textbooks or lab manuals.
+- **Scientific Graphing**: "Lab Mode" renders charts on engineering graph paper with 1mm grid scaling and pan/zoom capabilities.
 
 **Quick Start (Backend)**
 - **Prerequisites:**: Node 18+, npm, a Supabase project with vector embeddings, Lingo.dev API key, OpenAI API key (if used), and `.env` configured.
@@ -34,7 +35,8 @@ npm start
 
 **Frontend (brief)**
 - The companion UI lives in `AgoraLearn-UI`. It features a modern Next.js App Router setup with:
-  - **Dynamic Charting:** Uses `react-chartjs-2` with `chartjs-plugin-zoom` (lazy loaded) for high-performance scientific plotting.
+  - **Physics Engine:** `ThreeDWrapper` uses React Three Fiber for hardware-accelerated simulations (Projectiles, Optics) with HTML overlay controls.
+  - **Dynamic Charting:** `ChartWrapper` supports complex regression (Poly/Exp) and Error Bars on scientific graph paper.
   - **Voice Interface:** Native AudioContext integration for silence detection and real-time voice feedback.
 - Typical commands:
 ```

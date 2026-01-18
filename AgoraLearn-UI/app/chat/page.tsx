@@ -9,6 +9,9 @@ import dynamic from 'next/dynamic';
 
 const ChartWrapper = dynamic(() => import('@components/ChartWrapper'), { ssr: false });
 const ThreeDWrapper = dynamic(() => import('@components/ThreeDWrapper'), { ssr: false });
+const AudioVisualizer = dynamic(() => import('@components/AudioVisualizer'), { ssr: false });
+const QuizInterface = dynamic(() => import('@components/QuizInterface'), { ssr: false });
+import { ExperimentJournal } from '@components/ExperimentJournal';
 
 import { Button } from "@components/ui/button";
 import { Card, CardContent } from "@components/ui/card";
@@ -37,7 +40,7 @@ type Message = {
   id: string; 
   role: Role; 
   content?: string; 
-  kind?: 'text' | 'table' | 'chart' | 'reading-input' | '3d'; 
+  kind?: 'text' | 'table' | 'chart' | 'reading-input' | '3d' | 'quiz'; 
   payload?: any; 
   createdAt?: string; 
   // Lab Assistant specific
@@ -285,6 +288,8 @@ export default function ChatPage() {
   const [showInlineReference, setShowInlineReference] = useState(false);
   const [popupPosition, setPopupPosition] = useState<{ top: number; left: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string | null>(null);
+
+  const [showAudioViz, setShowAudioViz] = useState(false);
 
   // conversation id (auto-generated)
   const [conversationId, setConversationId] = useState<string | null>(() => {
@@ -613,6 +618,14 @@ export default function ChatPage() {
              const fallback = body.result.message || "Could not generate 3D visualization.";
              pushMessage({ id: makeId('a-err-'), role: 'assistant', kind: 'text', content: String(fallback), createdAt: new Date().toISOString() });
          }
+      } else if (body?.intent === 'quiz_gen' && body?.result?.questions) {
+         pushMessage({ 
+            id: makeId('a-quiz-'), 
+            role: 'assistant', 
+            kind: 'quiz', 
+            payload: body.result, 
+            createdAt: new Date().toISOString() 
+         });
       } else {
         // default: show textual result (summary / rag / chart insights)
         const answer = body?.result?.summary ?? body?.result?.answer ?? body?.result ?? (body?.result?.insights ?? null);
@@ -684,12 +697,30 @@ export default function ChatPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                         {/* Audio Viz Toggle */}
+                         <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => setShowAudioViz(!showAudioViz)} 
+                            className={`${showAudioViz ? 'text-cyan-400 bg-cyan-900/20' : 'text-gray-400'} hover:text-white hover:bg-white/10`}
+                            title="Toggle Audio Oscilloscope"
+                         >
+                            <AudioLines className="h-4 w-4" />
+                         </Button>
+
                          {/* Export Button */}
                          <Button variant="ghost" size="icon" onClick={exportConversation} className="text-gray-400 hover:text-white hover:bg-white/10">
                             <Download className="h-4 w-4" />
                          </Button>
                     </div>
                 </div>
+
+                {/* Audio Viz Panel */}
+                {showAudioViz && (
+                    <div className="mx-4 mb-2">
+                        <AudioVisualizer />
+                    </div>
+                )}
 
                 {/* Messages Scroll Area */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent mx-4 bg-black/20 backdrop-blur-sm border-x border-white/5" onMouseUp={handleMouseUp}>
@@ -747,6 +778,7 @@ export default function ChatPage() {
                                           </div>
                                         ) : m.kind === 'chart' && m.payload ? (
                                           <div className="space-y-3 w-full">
+                                            <ExperimentJournal currentData={m.payload} currentSummary={m.content || m.conclusion || "Chart Analysis"} />
                                             {(() => {
                                                 // Try to get calculations from message, OR calculate on the fly
                                                 const stats = m.calculations || calculateRegression(m.payload);
@@ -789,8 +821,17 @@ export default function ChatPage() {
                                                   </div>
                                               )}
                                           </div>
+                                        ) : m.kind === 'quiz' && m.payload ? (
+                                            <div className="w-full">
+                                                <React.Suspense fallback={<div>Loading Quiz...</div>}>
+                                                     <QuizInterface data={m.payload} />
+                                                </React.Suspense>
+                                            </div>
                                         ) : m.kind === '3d' && m.payload ? (
                                             <div className="space-y-3 w-full h-full min-h-[400px]">
+                                                {/* Save Button for 3D/Scientific data */}
+                                                <ExperimentJournal currentData={m.payload} currentSummary={m.content} />
+                                                
                                                 <React.Suspense fallback={<div className="h-[400px] flex items-center justify-center bg-white/5 animate-pulse rounded">Loading 3D Engine...</div>}>
                                                     <ThreeDWrapper data={m.payload} />
                                                 </React.Suspense>

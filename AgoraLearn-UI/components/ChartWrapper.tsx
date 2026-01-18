@@ -189,7 +189,7 @@ const graphPaperPlugin = {
   }
 };
 
-type Series = { name?: string; points: Array<{ x: string | number; y: number }> };
+type Series = { name?: string; points: Array<{ x: string | number; y: number; error?: number; yError?: number }> };
 
 export default function ChartWrapper({ chart }: { chart: any }) {
   const chartRef = useRef<any>(null);

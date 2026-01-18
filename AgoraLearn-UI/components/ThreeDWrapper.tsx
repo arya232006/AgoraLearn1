@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars, Text, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -44,31 +44,33 @@ function OpticsScene({ initialFocalLength=3, initialObjectDistance=6, objectHeig
   // For visualization, we place the lens at 0. Object is at -do. Image is at +di (if real).
   const objPos = new THREE.Vector3(-doDist, 0, 0);
   const imgPos = new THREE.Vector3(di, 0, 0);
-  
-  // Ray 1: Parallel to axis, then through Focal Point (F) on image side
-  // Start: (-do, ho) -> Lens (0, ho) -> (di, hi) OR extended through F (f, 0)
-  const ray1Points = [
-      new THREE.Vector3(-doDist, objectHeight, 0),
-      new THREE.Vector3(0, objectHeight, 0),
-      new THREE.Vector3(di, hi, 0) // Convergence point
-  ];
-  // Extend Ray 1 visually past image if needed
-  if(di > 0) ray1Points.push(new THREE.Vector3(di + 2, hi + (hi/di)*2, 0));
-
-  // Ray 2: Through Center (0,0) - undeviated
-  const ray2Points = [
-      new THREE.Vector3(-doDist, objectHeight, 0),
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(di, hi, 0)
-  ];
-  if(di > 0) ray2Points.push(new THREE.Vector3(di + 2, hi + (hi/di)*2, 0));
+  const isVirtual = di < 0; // Virtual image if do < f
 
   // Visual Geometry
   const lightColor = "#ffff00";
-  const ray1Geom = new THREE.BufferGeometry().setFromPoints(ray1Points);
-  const ray2Geom = new THREE.BufferGeometry().setFromPoints(ray2Points);
+  
+  const { ray1Geom, ray2Geom } = useMemo(() => {
+      // Ray 1: Parallel to axis, then through Focal Point (F) on image side
+      const ray1Points = [
+          new THREE.Vector3(-doDist, objectHeight, 0),
+          new THREE.Vector3(0, objectHeight, 0),
+          new THREE.Vector3(di, hi, 0)
+      ];
+      if(di > 0) ray1Points.push(new THREE.Vector3(di + 2, hi + (hi/di)*2, 0));
 
-  const isVirtual = di < 0; // Virtual image if do < f
+      // Ray 2: Through Center (0,0) - undeviated
+      const ray2Points = [
+          new THREE.Vector3(-doDist, objectHeight, 0),
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(di, hi, 0)
+      ];
+      if(di > 0) ray2Points.push(new THREE.Vector3(di + 2, hi + (hi/di)*2, 0));
+
+      return {
+          ray1Geom: new THREE.BufferGeometry().setFromPoints(ray1Points),
+          ray2Geom: new THREE.BufferGeometry().setFromPoints(ray2Points)
+      };
+  }, [doDist, objectHeight, di, hi]);
 
   return (
     <group>
@@ -130,8 +132,14 @@ function OpticsScene({ initialFocalLength=3, initialObjectDistance=6, objectHeig
         )}
 
         {/* Light Rays */}
-        <line geometry={ray1Geom}><lineBasicMaterial color={lightColor} /></line>
-        <line geometry={ray2Geom}><lineBasicMaterial color={lightColor} /></line>
+        <line>
+            <primitive object={ray1Geom} attach="geometry" />
+            <lineBasicMaterial color={lightColor} />
+        </line>
+        <line>
+            <primitive object={ray2Geom} attach="geometry" />
+            <lineBasicMaterial color={lightColor} />
+        </line>
 
         {/* UI Controls */}
         <Html position={[0, -5, 0]} style={{ width: '300px', transform: 'translateX(-50%)' }}>
@@ -180,21 +188,21 @@ function ProjectileScene({ initialVelocity=20, initialAngle=45, gravity=9.8 }) {
     const [time, setTime] = useState(0);
     const [isRunning, setIsRunning] = useState(true);
 
-    // Calculate Trajectory Path
-    const points = [];
+    // Physics Constants
     const rad = (theta * Math.PI) / 180;
     const totalTime = (2 * v0 * Math.sin(rad)) / gravity;
-    
-    for (let t = 0; t <= totalTime; t += 0.1) {
-        const x = v0 * Math.cos(rad) * t;
-        const y = (v0 * Math.sin(rad) * t) - (0.5 * gravity * t * t);
-        points.push(new THREE.Vector3(x, y, 0));
-    }
-    // ensure last point hits ground exactly
     const maxRange = (v0*v0 * Math.sin(2*rad))/gravity;
-    points.push(new THREE.Vector3(maxRange, 0, 0));
 
-    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const lineGeometry = useMemo(() => {
+        const points = [];
+        for (let t = 0; t <= totalTime; t += 0.1) {
+            const x = v0 * Math.cos(rad) * t;
+            const y = (v0 * Math.sin(rad) * t) - (0.5 * gravity * t * t);
+            points.push(new THREE.Vector3(x, y, 0));
+        }
+        points.push(new THREE.Vector3(maxRange, 0, 0));
+        return new THREE.BufferGeometry().setFromPoints(points);
+    }, [v0, rad, gravity, totalTime, maxRange]);
 
     useFrame((state, delta) => {
         if (!isRunning || !ballRef.current) return;
@@ -220,7 +228,8 @@ function ProjectileScene({ initialVelocity=20, initialAngle=45, gravity=9.8 }) {
             </mesh>
 
             {/* Trajectory Line */}
-            <line geometry={lineGeometry}>
+            <line>
+                <primitive object={lineGeometry} attach="geometry" />
                 <lineBasicMaterial color="yellow" linewidth={2} />
             </line>
 

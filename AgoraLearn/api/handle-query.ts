@@ -9,6 +9,7 @@ import { generateSpeech } from './utils/tts-utils';
 import { generateLabReport } from '../lib/lab-assistant';
 
 import { generateChartWithGemini } from './utils/gemini-chart';
+import { generateQuiz } from '../lib/quiz-generator';
 
 const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
 - "summarize" (user wants a document summary / key points)
@@ -16,6 +17,7 @@ const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's reques
 - "chart_analysis" (user asks about charts, graphs, trends)
 - "lab_assistant" (user provides experimental readings/data and asks for calculation, graph plotting, or lab report)
 - "3d_viz" (user asks to visualize a molecule, chemical structure, vector field, or 3D concept)
+- "quiz_gen" (user asks for a quiz, test, or exam prep based on the content)
 - "rag_query" (regular document QA / retrieval)
 
 Return ONLY a JSON object (no extra text) like:
@@ -47,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const low = text.toLowerCase();
       if (low.includes('summar') || low.includes('key point') || low.includes('summary')) classification.intent = 'summarize';
       else if (low.includes('molecule') || low.includes('structure') || low.includes('3d') || low.includes('vector') || low.includes('visualize') || low.includes('projectil') || low.includes('simulation') || low.includes('throw') || low.includes('lens') || low.includes('optic') || low.includes('ray')) classification.intent = '3d_viz';
+      else if (low.includes('quiz') || low.includes('test') || low.includes('exam') || low.includes('practice')) classification.intent = 'quiz_gen';
       else if (low.includes('table') || low.includes('rows') || low.includes('columns')) classification.intent = 'table_qa';
       // REMOVED 'chart'/'graph'/'plot' from here to allow RAG pipeline to handle context first, 
       // then trigger Hybrid Graph Generation.
@@ -208,6 +211,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return res.json({ ok: true, intent, confidence: classification.confidence, result: report });
+    }
+
+    if (intent === 'quiz_gen') {
+      // Use provided manual/context or fetch from docId if needed
+      let context = (reference && String(reference).trim()) || (docText && String(docText).trim()) || text;
+      
+      const quiz = await generateQuiz(context);
+      return res.json({ ok: true, intent, confidence: classification.confidence, result: quiz });
     }
 
     // default: RAG query (forward to existing RAG endpoint)
