@@ -7,7 +7,21 @@ import { Button } from "@components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@components/ui/card"
 import Link from "next/link"
 import DarkVeil from '@components/ui/DarkVeil';
-import { FileText, Upload, MessageSquare, Clock, HardDrive, Plus, ArrowRight, Trash2 } from "lucide-react"
+import { 
+    FileText, 
+    Upload, 
+    MessageSquare, 
+    Clock, 
+    HardDrive, 
+    Plus, 
+    ArrowRight, 
+    Trash2, 
+    FlaskConical, 
+    Atom, 
+    Brain, 
+    Microscope, 
+    LineChart 
+} from "lucide-react"
 
 interface FileItem {
   id: string;
@@ -15,6 +29,13 @@ interface FileItem {
   uploadedAt: string;
   size: string;
   doc_id?: string;
+}
+
+interface ExperimentItem {
+    id: string;
+    title: string;
+    date: string;
+    type: 'chart' | 'simulation' | 'quiz';
 }
 
 function formatBytes(bytes: number) {
@@ -27,9 +48,11 @@ function formatBytes(bytes: number) {
 
 export default function Dashboard() {
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [experiments, setExperiments] = useState<ExperimentItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 1. Fetch Files from Supabase
     async function fetchFiles() {
       try {
         if (!supabase) {
@@ -39,7 +62,8 @@ export default function Dashboard() {
         const { data, error } = await supabase
           .from('files')
           .select('id, name, size, uploaded_at, doc_id')
-          .order('uploaded_at', { ascending: false });
+          .order('uploaded_at', { ascending: false })
+          .limit(5); // limit to 5 for dashboard
           
         if (error) throw error;
         
@@ -57,155 +81,224 @@ export default function Dashboard() {
         setLoading(false);
       }
     }
+
+    // 2. Fetch Experiments from LocalStorage
+    try {
+        const savedJournal = localStorage.getItem('agoralearn:journal');
+        if (savedJournal) {
+            const journal = JSON.parse(savedJournal);
+            setExperiments(journal.slice(0, 3).map((entry: any) => ({
+                id: entry.id,
+                title: entry.title || "Untitled Experiment",
+                date: new Date(entry.timestamp).toLocaleDateString(),
+                type: entry.type === '3d' ? 'simulation' : 'chart'
+            })));
+        }
+    } catch (e) { console.error("Error loading journal", e); }
+
     fetchFiles();
   }, []);
 
   return (
     <>
       <Navbar />
-      <div className="relative min-h-screen text-white">
-        <div className="fixed inset-0 -z-10">
+      <div className="relative min-h-screen text-white/90 font-sans selection:bg-indigo-500/30">
+        <div className="fixed inset-0 -z-10 bg-[#0a0a0a]">
           <DarkVeil />
         </div>
         
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="max-w-7xl mx-auto px-6 py-12">
           {/* Header Section */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 gap-6 border-b border-white/5 pb-8">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight mb-2">Dashboard</h1>
-              <p className="text-white/60 text-lg">Manage your documents and insights.</p>
+              <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-3 text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-400">
+                  Lab Dashboard
+              </h1>
+              <div className="flex items-center gap-2 text-indigo-400/80 text-sm font-mono uppercase tracking-wider">
+                  <Microscope className="w-4 h-4" />
+                  <span>Scientific Workspace Active</span>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <Button asChild className="bg-white text-black hover:bg-gray-200">
+            <div className="flex gap-4">
+              <Button asChild className="bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/30 backdrop-blur-md">
                 <Link href="/upload">
                   <Upload className="w-4 h-4 mr-2" />
-                  Upload New
+                  Upload Data
+                </Link>
+              </Button>
+              <Button asChild className="bg-white text-black hover:bg-gray-200">
+                <Link href="/chat">
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Project
                 </Link>
               </Button>
             </div>
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
             <StatsCard 
-              title="Total Documents" 
+              title="Documents Analyzed" 
               value={files.length.toString()} 
               icon={<FileText className="w-5 h-5 text-blue-400" />} 
             />
             <StatsCard 
-              title="Storage Used" 
-              value={files.length > 0 ? "Active" : "0 MB"} 
-              icon={<HardDrive className="w-5 h-5 text-purple-400" />} 
+              title="Simulations Run" 
+              value={experiments.filter(e => e.type === 'simulation').length.toString()} 
+              icon={<Atom className="w-5 h-5 text-cyan-400" />} 
+            />
+             <StatsCard 
+              title="Charts Generated" 
+              value={experiments.filter(e => e.type === 'chart').length.toString()} 
+              icon={<LineChart className="w-5 h-5 text-emerald-400" />} 
             />
             <StatsCard 
-              title="Recent Activity" 
-              value={files.length > 0 ? "Just now" : "None"} 
-              icon={<Clock className="w-5 h-5 text-green-400" />} 
+              title="Lab Usage" 
+              value="Active" 
+              icon={<Clock className="w-5 h-5 text-purple-400" />} 
             />
           </div>
 
           {/* Main Content Area */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            {/* Recent Files List (Takes up 2 columns) */}
-            <div className="lg:col-span-2 space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-semibold">Recent Documents</h2>
-                <Link href="/upload" className="text-sm text-blue-400 hover:text-blue-300 flex items-center">
-                  View All <ArrowRight className="w-4 h-4 ml-1" />
-                </Link>
-              </div>
+            {/* Left Column: Recent Work (2 cols) */}
+            <div className="lg:col-span-2 space-y-8">
+              
+              {/* Recent Files */}
+              <section>
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold flex items-center gap-2 text-white/90">
+                        <FileText className="w-5 h-5 text-indigo-500" />
+                        Recent Documents
+                    </h2>
+                    <Link href="/upload" className="text-xs font-medium text-white/40 hover:text-white transition uppercase tracking-widest">
+                        View All
+                    </Link>
+                </div>
 
-              {loading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-20 bg-white/5 rounded-xl animate-pulse" />
-                  ))}
-                </div>
-              ) : files.length === 0 ? (
-                <Card className="bg-white/5 border-white/10">
-                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4">
-                      <Upload className="w-8 h-8 text-white/40" />
+                {loading ? (
+                    <div className="space-y-3">
+                    {[1, 2].map((i) => (
+                        <div key={i} className="h-20 bg-white/5 rounded-xl animate-pulse" />
+                    ))}
                     </div>
-                    <h3 className="text-xl font-medium mb-2 text-white">No documents yet</h3>
-                    <p className="text-white/50 mb-6 max-w-sm">Upload your first document to start generating insights and chatting with your data.</p>
-                    <Button asChild variant="outline" className="border-white/20 hover:bg-white/10 text-white">
-                      <Link href="/upload">Upload Document</Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-3">
-                  {files.map((file) => (
-                    <div key={file.id} className="group flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all">
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-500/20 rounded-lg">
-                          <FileText className="w-6 h-6 text-blue-400" />
+                ) : files.length === 0 ? (
+                    <EmptyState 
+                        icon={<FileText className="w-8 h-8 text-white/20" />}
+                        title="No documents yet"
+                        desc="Upload research papers or data sheets to get started."
+                        actionLink="/upload"
+                        actionText="Upload PDF"
+                    />
+                ) : (
+                    <div className="grid gap-3">
+                    {files.map((file) => (
+                        <div key={file.id} className="group relative overflow-hidden flex items-center justify-between p-4 bg-white/[0.03] border border-white/5 rounded-xl hover:bg-white/[0.06] hover:border-indigo-500/20 transition-all duration-300">
+                            <div className="flex items-center gap-4 relative z-10">
+                                <div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/10 group-hover:border-indigo-500/30 transition-colors">
+                                <FileText className="w-5 h-5 text-indigo-400" />
+                                </div>
+                                <div>
+                                <h3 className="font-medium text-white/90 text-sm group-hover:text-indigo-300 transition-colors">{file.name}</h3>
+                                <div className="flex items-center gap-3 text-xs text-white/40 mt-1 font-mono">
+                                    <span>{file.size}</span>
+                                    <span className="w-1 h-1 rounded-full bg-white/20"></span>
+                                    <span>{file.uploadedAt}</span>
+                                </div>
+                                </div>
+                            </div>
+                            <Button size="icon" variant="ghost" className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-indigo-500/20 hover:text-indigo-300" asChild>
+                                <Link href={`/chat?docId=${file.doc_id || file.id}`}>
+                                    <ArrowRight className="w-4 h-4" />
+                                </Link>
+                            </Button>
                         </div>
-                        <div>
-                          <h3 className="font-medium text-white group-hover:text-blue-400 transition-colors">{file.name}</h3>
-                          <div className="flex items-center gap-3 text-xs text-white/40 mt-1">
-                            <span>{file.size}</span>
-                            <span>•</span>
-                            <span>{file.uploadedAt}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-white/20" asChild>
-                          <Link href={`/chat?docId=${file.doc_id || file.id}`}>
-                            <MessageSquare className="w-4 h-4 text-white/70" />
-                          </Link>
-                        </Button>
-                      </div>
+                    ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                )}
+              </section>
+
+              {/* Recent Experiments (Journal) */}
+              <section>
+                 <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold flex items-center gap-2 text-white/90">
+                        <FlaskConical className="w-5 h-5 text-emerald-500" />
+                        Lab Journal
+                    </h2>
+                 </div>
+                 
+                 {experiments.length === 0 ? (
+                      <EmptyState 
+                        icon={<FlaskConical className="w-8 h-8 text-white/20" />}
+                        title="Lab journal empty"
+                        desc="Run simulations or generate charts to save them here."
+                        actionLink="/chat"
+                        actionText="Go to Lab"
+                    />
+                 ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {experiments.map((exp) => (
+                            <Link key={exp.id} href="/chat" className="group block">
+                                <div className="h-full p-5 bg-gradient-to-br from-white/[0.03] to-white/[0.01] border border-white/5 rounded-xl hover:border-emerald-500/30 hover:from-emerald-900/10 transition-all">
+                                    <div className="flex items-start justify-between mb-3">
+                                        <div className={`p-2 rounded-lg ${exp.type === 'simulation' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                            {exp.type === 'simulation' ? <Atom className="w-4 h-4" /> : <LineChart className="w-4 h-4" />}
+                                        </div>
+                                        <span className="text-[10px] uppercase tracking-wider text-white/30 font-bold">{exp.type}</span>
+                                    </div>
+                                    <h3 className="text-sm font-medium text-white/80 group-hover:text-white line-clamp-2 mb-2">{exp.title}</h3>
+                                    <p className="text-xs text-white/40 font-mono">{exp.date}</p>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                 )}
+              </section>
+
             </div>
 
-            {/* Quick Actions Sidebar */}
+            {/* Right Column: Quick Actions & Tips */}
             <div className="space-y-6">
-              <h2 className="text-2xl font-semibold">Quick Actions</h2>
-              <div className="grid gap-4">
-                <Link href="/chat">
-                  <Card className="bg-gradient-to-br from-blue-600/20 to-purple-600/20 border-blue-500/30 hover:border-blue-500/50 transition-all cursor-pointer group">
-                    <CardContent className="p-6 flex items-center gap-4">
-                      <div className="p-3 bg-blue-500 rounded-full shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                        <MessageSquare className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-white text-lg">Start Chat</h3>
-                        <p className="text-white/60 text-sm">Ask questions to AI</p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-
-                <Link href="/upload">
-                  <Card className="bg-white/5 border-white/10 hover:bg-white/10 transition-all cursor-pointer group">
-                    <CardContent className="p-6 flex items-center gap-4">
-                      <div className="p-3 bg-white/10 rounded-full group-hover:scale-110 transition-transform">
-                        <Upload className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-white text-lg">Upload File</h3>
-                        <p className="text-white/60 text-sm">Add new documents</p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
+              <h2 className="text-xl font-semibold text-white/90 mb-6">Quick Actions</h2>
+              <div className="grid gap-3">
+                <ActionCard 
+                    title="Launch Physics Engine" 
+                    desc="3D Simulations & Models" 
+                    icon={<Atom className="w-5 h-5 text-cyan-200" />}
+                    color="bg-cyan-600"
+                    href="/chat"
+                />
+                <ActionCard 
+                    title="Data Analysis" 
+                    desc="Upload & Plot Charts" 
+                    icon={<LineChart className="w-5 h-5 text-emerald-200" />}
+                    color="bg-emerald-600"
+                    href="/upload"
+                />
+                <ActionCard 
+                    title="Take a Quiz" 
+                    desc="Test your knowledge" 
+                    icon={<Brain className="w-5 h-5 text-pink-200" />}
+                    color="bg-pink-600"
+                    href="/chat"
+                />
               </div>
 
               {/* Tips Card */}
-              <Card className="bg-white/5 border-white/10 mt-8">
+              <Card className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border-indigo-500/30 overflow-hidden relative mt-8">
+                <div className="absolute top-0 right-0 p-3 opacity-10">
+                    <Atom className="w-24 h-24" />
+                </div>
                 <CardHeader>
-                  <CardTitle className="text-white text-lg">Did you know?</CardTitle>
+                  <CardTitle className="text-white text-lg flex items-center gap-2">
+                      <Microscope className="w-4 h-4 text-cyan-400" />
+                      Lab Tip
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-white/60 text-sm leading-relaxed">
-                    You can now use <strong>Voice Mode</strong> to talk directly to your documents. Just click the headphones icon in the chat!
+                  <p className="text-indigo-100/70 text-sm leading-relaxed relative z-10">
+                    Try generating an <strong>AI Quiz</strong> from your documents to test your retention. Just ask <em>"Create a quiz about this"</em> in the chat.
                   </p>
                 </CardContent>
               </Card>
@@ -219,16 +312,50 @@ export default function Dashboard() {
 
 function StatsCard({ title, value, icon }: { title: string, value: string, icon: React.ReactNode }) {
   return (
-    <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
-      <CardContent className="p-6 flex items-center justify-between">
+    <Card className="bg-white/[0.03] border-white/5 backdrop-blur-sm hover:bg-white/[0.05] transition-colors">
+      <CardContent className="p-5 flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-white/50 mb-1">{title}</p>
-          <h3 className="text-2xl font-bold text-white">{value}</h3>
+          <p className="text-xs font-medium text-white/40 mb-1 uppercase tracking-wider">{title}</p>
+          <h3 className="text-2xl font-bold text-white/90">{value}</h3>
         </div>
-        <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+        <div className="p-3 bg-white/[0.05] rounded-xl border border-white/5">
           {icon}
         </div>
       </CardContent>
     </Card>
   )
+}
+
+function ActionCard({ title, desc, icon, color, href }: { title: string, desc: string, icon: React.ReactNode, color: string, href: string }) {
+    return (
+        <Link href={href}>
+            <div className="group flex items-center gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.07] transition-all cursor-pointer">
+                <div className={`p-3 rounded-lg ${color} bg-opacity-20 flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
+                    {icon}
+                </div>
+                <div>
+                    <h3 className="font-semibold text-white/90 group-hover:text-white transition-colors">{title}</h3>
+                    <p className="text-xs text-white/50 group-hover:text-white/70 transition-colors">{desc}</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-white/20 ml-auto group-hover:text-white/60 group-hover:translate-x-1 transition-all" />
+            </div>
+        </Link>
+    )
+}
+
+function EmptyState({ icon, title, desc, actionLink, actionText }: { icon: React.ReactNode, title: string, desc: string, actionLink: string, actionText: string }) {
+    return (
+        <Card className="bg-white/[0.02] border-white/5 border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-16 h-16 bg-white/[0.05] rounded-full flex items-center justify-center mb-4">
+                {icon}
+            </div>
+            <h3 className="text-lg font-medium mb-1 text-white/80">{title}</h3>
+            <p className="text-white/40 mb-6 max-w-xs text-sm">{desc}</p>
+            <Button asChild variant="outline" className="border-white/10 hover:bg-white/5 text-white bg-transparent">
+                <Link href={actionLink}>{actionText}</Link>
+            </Button>
+            </CardContent>
+        </Card>
+    )
 }
