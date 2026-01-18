@@ -8,7 +8,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
-    "types": ["node"],
     "resolveJsonModule": true
   },
   "include": ["api/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "*.ts"],
