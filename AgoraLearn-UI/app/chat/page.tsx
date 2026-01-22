@@ -213,7 +213,8 @@ function uploadWithProgress(file: File, onProgress: (p: number) => void) {
     const fd = new FormData();
     fd.append("file", file, file.name);
 
-    xhr.open("POST", "http://localhost:3000/api/upload", true);
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
+    xhr.open("POST", `${apiBase}/api/upload`, true);
 
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) {
