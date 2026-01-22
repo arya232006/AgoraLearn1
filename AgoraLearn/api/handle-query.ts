@@ -10,6 +10,7 @@ import { generateLabReport } from '../lib/lab-assistant';
 
 import { generateChartWithGemini } from './utils/gemini-chart';
 import { generateQuiz } from '../lib/quiz-generator';
+import { runRAG } from '../lib/rag';
 
 const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
 - "summarize" (user wants a document summary / key points)
@@ -224,15 +225,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // default: RAG query (forward to existing RAG endpoint)
     if (intent === 'rag_query') {
       if (!docId) return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No docId provided. Please ingest the document first or provide docId.' } });
-      const serverBase = process.env.SERVER_BASE || process.env.SERVER_BASE_URL || 'http://localhost:3000';
+      
       try {
-        const forward = await fetch(`${serverBase}/api/converse`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: text, docId }),
-        });
-        const forwarded = await forward.json().catch(() => null);
-
+        console.log(`[Handle Query] Running RAG directly for docId: ${docId}`);
+        const forwarded = await runRAG(text, 5, docId); // Using topK=5 for speed/relevance
+        
         // --- HYBRID GENERATION: If user asks for Plot/Graph, call Gemini ---
         let chartConfig: any = null;
         let finalIntent = intent;
