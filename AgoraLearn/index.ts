@@ -9,7 +9,23 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const app = express();
-app.use(cors());
+// Configure CORS to allow requests from Vercel and Localhost with credentials
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    // Allow localhost and Vercel deployments
+    if (origin.startsWith('http://localhost') || origin.includes('.vercel.app') || origin.includes('agoralearn')) {
+      return callback(null, true);
+    }
+    // Fallback: allow it (or block if you want stricter security) - preventing error for now
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 // Cloud Run populates PORT (usually 8080). We must listen on it.
 // We also bind to 0.0.0.0 explicitly to ensure we accept outside connections.
 const PORT = process.env.PORT || 3000;
