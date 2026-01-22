@@ -538,9 +538,10 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: queryText, docId: uploadedDoc?.id, replyWithAudio: conversationModeRef.current }),
       });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      
       const body = await res.json();
-
+      if (!res.ok) throw new Error(body.error || body.message || `Server error ${res.status}`);
+      
       // Play Audio & Loop
       if (body.audioBase64) {
         setIsAiSpeaking(true);
