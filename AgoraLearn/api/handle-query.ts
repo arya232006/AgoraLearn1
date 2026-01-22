@@ -263,7 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           audioBase64 = await generateSpeech(forwarded.answer);
         }
 
-        const resultPayload = forwarded ?? { message: 'RAG forwarding failed' };
+        const resultPayload: any = forwarded ?? { message: 'RAG forwarding failed' };
         
         // If we generated a chart, merge it into the result
         if (chartConfig) {
