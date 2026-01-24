@@ -6,6 +6,54 @@ type OpenAIEmbeddingResponse = {
   data: { embedding: number[] }[];
 };
 
+export async function embedTextsBatch(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('Missing OPENAI_API_KEY');
+
+  const cleanTexts = texts.map(t => t.replace(/\n/g, ' '));
+  
+  // Retry loop for batch
+  let lastErr: any = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const timeoutMs = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS || process.env.OPENAI_TIMEOUT_MS || 60000);
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), timeoutMs);
+
+      const res = await fetch(OPENAI_EMBEDDING_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ model: OPENAI_EMBEDDING_MODEL, input: cleanTexts }),
+        signal: ac.signal as any
+      });
+      clearTimeout(to);
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`OpenAI batch embedding error: ${res.status} ${txt}`);
+      }
+
+      const data = (await res.json()) as OpenAIEmbeddingResponse;
+      if (!data || !Array.isArray(data.data)) {
+        throw new Error('Unexpected OpenAI batch embedding response');
+      }
+      
+      // Ensure we return embeddings in correct order
+      return data.data.map(item => item.embedding);
+
+    } catch (e: any) {
+      lastErr = e;
+      console.warn(`embedTextsBatch attempt ${attempt} failed:`, String(e?.message ?? e));
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  throw lastErr;
+}
+
 export async function embedText(text: string): Promise<number[]> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Missing OPENAI_API_KEY');

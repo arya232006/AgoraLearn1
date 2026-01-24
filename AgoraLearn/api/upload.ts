@@ -12,7 +12,7 @@ export const config = {
 };
 
 import { chunkText } from '../lib/chunk';
-import { embedText } from '../lib/embeddings';
+import { embedText, embedTextsBatch } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
 import { analyzeChart } from './utils/vision-utils';
 import fs from 'fs';
@@ -238,21 +238,33 @@ async function ingestTextAndStore(text: string, providedDocId?: string) {
     console.warn('All chunks filtered out as noise; falling back to ingest original text as one chunk');
     filtered = [text.trim()];
   }
-  const rows = await Promise.all(filtered.map(async (chunk) => {
-    try {
-      console.debug('Embedding chunk preview:', chunk.slice(0, 120).replace(/\n/g, ' '));
-      const raw = await embedText(chunk);
-      const embedding = normalizeEmbedding(raw);
-      return { doc_id: docId, text: chunk, embedding };
-    } catch (e: any) {
-      console.error('Error embedding chunk (len=' + String(chunk?.length ?? 0) + '):', e?.message ?? e);
-      console.error('Chunk (hex preview):', Buffer.from(String(chunk || '')).toString('hex').slice(0, 200));
-      throw e;
-    }
-  }));
-  const { error } = await supabase.from('chunks').insert(rows as any);
-  if (error) throw error;
-  return { docId, chunksInserted: rows.length };
+  
+  // Parallel Batch Processing
+  const BATCH_SIZE = 20;
+  let totalInserted = 0;
+  
+  // Process batches
+  for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
+      const batchChunks = filtered.slice(i, i + BATCH_SIZE);
+      console.log(`[Ingest] Processing batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(filtered.length/BATCH_SIZE)} (${batchChunks.length} chunks)`);
+      
+      const embeddings = await embedTextsBatch(batchChunks);
+      
+      const rows = batchChunks.map((chunk, idx) => ({
+          doc_id: docId,
+          text: chunk,
+          embedding: normalizeEmbedding(embeddings[idx])
+      }));
+      
+      const { error } = await supabase.from('chunks').insert(rows as any);
+      if (error) {
+           console.error('Batch insert failed:', error);
+           throw error;
+      }
+      totalInserted += rows.length;
+  }
+
+  return { docId, chunksInserted: totalInserted };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

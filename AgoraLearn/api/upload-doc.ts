@@ -9,7 +9,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { chunkText } from '../lib/chunk';
-import { embedText } from '../lib/embeddings';
+import { embedText, embedTextsBatch } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
 import crypto from 'crypto';
 import mammoth from 'mammoth';
@@ -78,23 +78,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'No readable text found in document' });
     }
 
-    const chunks = chunkText(text);
-
-    const rows = await Promise.all(
-      chunks.map(async (chunk) => {
-        const raw = await embedText(chunk);
-        const embedding = normalizeEmbedding(raw);
-        return { doc_id: docId!, text: chunk, embedding };
-      })
-    );
-
-    const { error } = await supabase.from('chunks').insert(rows);
-    if (error) {
-      console.error('upload-doc supabase error:', error);
-      return res.status(500).json({ error: 'Failed to store chunks', details: error });
+    const chunks = chunkText(text).filter(c => c && c.trim().length > 0);
+    
+    // Batch processing
+    const BATCH_SIZE = 20;
+    let chunksInserted = 0;
+    
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, i + BATCH_SIZE);
+        try {
+            const embeddings = await embedTextsBatch(batch);
+            const batchRows = batch.map((chunk, idx) => ({
+                 doc_id: docId!,
+                 text: chunk,
+                 embedding: normalizeEmbedding(embeddings[idx])
+            }));
+            
+            const { error } = await supabase.from('chunks').insert(batchRows);
+            if (error) throw error;
+            chunksInserted += batchRows.length;
+        } catch (e) {
+            console.error('Batch error in upload-doc:', e);
+            throw e;
+        }
     }
 
-    return res.status(200).json({ ok: true, docId, chunksInserted: rows.length });
+    return res.status(200).json({ ok: true, docId, chunksInserted });
   } catch (err: any) {
     console.error('api/upload-doc error:', err);
     return res.status(500).json({ error: err?.message ?? 'Internal Server Error' });

@@ -9,7 +9,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { chunkText } from '../lib/chunk';
-import { embedText } from '../lib/embeddings';
+import { embedText, embedTextsBatch } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
 import crypto from 'crypto';
 
@@ -105,21 +105,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'All extracted chunks were filtered out as noise' });
     }
 
-    const rows = await Promise.all(
-      filteredChunks.map(async (chunk) => {
-        const raw = await embedText(chunk);
-        const embedding = normalizeEmbedding(raw);
-        return { doc_id: docId!, text: chunk, embedding };
-      })
-    );
+    // Batch processing
+    const BATCH_SIZE = 20;
+    let chunksInserted = 0;
 
-    const { error } = await supabase.from('chunks').insert(rows);
-    if (error) {
-      console.error('upload-url supabase error:', error);
-      return res.status(500).json({ error: 'Failed to store chunks', details: error });
+    for (let i = 0; i < filteredChunks.length; i += BATCH_SIZE) {
+        const batch = filteredChunks.slice(i, i + BATCH_SIZE);
+        try {
+            const embeddings = await embedTextsBatch(batch);
+            const rows = batch.map((chunk, idx) => ({
+                 doc_id: docId!,
+                 text: chunk,
+                 embedding: normalizeEmbedding(embeddings[idx])
+            }));
+            
+            const { error } = await supabase.from('chunks').insert(rows);
+            if (error) throw error;
+            chunksInserted += rows.length;
+        } catch (e) {
+            console.error('Batch insert fail:', e);
+            throw e;
+        }
     }
 
-    return res.status(200).json({ ok: true, docId, chunksInserted: rows.length, sourceUrl: url });
+    return res.status(200).json({ ok: true, docId, chunksInserted, sourceUrl: url });
   } catch (err: any) {
     console.error('api/upload-url error:', err);
     return res.status(500).json({ error: err?.message ?? 'Internal Server Error' });

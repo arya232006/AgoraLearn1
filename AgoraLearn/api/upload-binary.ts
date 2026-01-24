@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import mammoth from 'mammoth';
 import { randomUUID } from 'crypto';
 import { chunkText } from '../lib/chunk';
-import { embedText } from '../lib/embeddings';
+import { embedText, embedTextsBatch } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
 
 const MAX_TEXT_LENGTH = 500_000;
@@ -144,21 +144,32 @@ async function ingestTextAndStore(text: string, providedDocId?: string) {
   if (text.length > MAX_TEXT_LENGTH) throw new Error(`Text too large. Max ${MAX_TEXT_LENGTH} characters allowed.`);
   const docId = providedDocId || randomUUID();
   const chunks = chunkText(text).filter((c) => c && c.trim().length > 0);
-  // Patch: Do not filter out any chunks as noise
-  const rows = await Promise.all(chunks.map(async (chunk) => {
-    try {
-      console.debug('Embedding chunk preview:', chunk.slice(0, 120).replace(/\n/g, ' '));
-      const raw = await embedText(chunk);
-      const embedding = normalizeEmbedding(raw);
-      return { doc_id: docId, text: chunk, embedding };
-    } catch (e: any) {
-      console.error('Error embedding chunk (len=' + String(chunk?.length ?? 0) + '):', e?.message ?? e);
-      throw e;
-    }
-  }));
-  const { error } = await supabase.from('chunks').insert(rows as any);
-  if (error) throw error;
-  return { docId, chunksInserted: rows.length };
+  
+  // Batch processing
+  const BATCH_SIZE = 20;
+  let totalInserted = 0;
+  
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batchChunks = chunks.slice(i, i + BATCH_SIZE);
+      console.log(`[Upload-Binary] Processing batch ${Math.ceil(i/BATCH_SIZE) + 1}/${Math.ceil(chunks.length/BATCH_SIZE)}`);
+      
+      const embeddings = await embedTextsBatch(batchChunks);
+      
+      const rows = batchChunks.map((chunk, idx) => ({
+          doc_id: docId,
+          text: chunk,
+          embedding: normalizeEmbedding(embeddings[idx])
+      }));
+      
+      const { error } = await supabase.from('chunks').insert(rows as any);
+      if (error) {
+           console.error('Batch insert error:', error);
+           throw error;
+      }
+      totalInserted += rows.length;
+  }
+
+  return { docId, chunksInserted: totalInserted };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
