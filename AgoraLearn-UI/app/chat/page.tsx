@@ -533,10 +533,14 @@ export default function ChatPage() {
     try {
       // send to unified prompt router which classifies and returns structured results
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
+      const bodyPayload: any = { text: queryText, docId: uploadedDoc?.id, replyWithAudio: conversationModeRef.current };
+      if (showInlineReference && referenceText) bodyPayload.reference = referenceText;
+      if (conversationId) bodyPayload.conversationId = conversationId;
+
       const res = await fetch(`${apiBase}/api/handle-query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: queryText, docId: uploadedDoc?.id, replyWithAudio: conversationModeRef.current }),
+        body: JSON.stringify(bodyPayload),
       });
       
       const body = await res.json();

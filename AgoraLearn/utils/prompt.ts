@@ -17,7 +17,8 @@ export function buildRagPrompt(
   prompt += `CONTEXT:\n${context}\n\n`;
 
   if (reference && reference.trim()) {
-    prompt += `REFERENCE:\n${reference.trim()}\n\n`;
+    prompt += `SELECTED TEXT (User is asking about this specific part):\n"${reference.trim()}"\n\n`;
+    prompt += "IMPORTANT: The user's question relates specifically to the SELECTED TEXT above. Focus your answer on explaining or clarifying that specific text using the context provided below.\n\n";
   }
 
   prompt += `QUESTION: ${query}\n\n`;

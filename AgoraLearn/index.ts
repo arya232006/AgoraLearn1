@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 const app = express();
 // Configure CORS to allow requests from Vercel and Localhost with credentials
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     // Allow localhost and Vercel deployments
@@ -37,7 +37,8 @@ function importHandler(handlerPath) {
 }
 
 // Map API routes to handlers
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Example routes (add more as needed)
 app.all('/api/converse', importHandler(path.join(__dirname, 'api', 'converse.js')));
