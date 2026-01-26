@@ -4,6 +4,23 @@ import { randomUUID } from 'crypto';
 import { chunkText } from '../lib/chunk';
 import { embedText, embedTextsBatch } from '../lib/embeddings';
 import { supabase } from '../lib/supabase';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+async function extractTextWithGeminiFlash(buffer: Buffer, mimeType: string): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const result = await model.generateContent([
+    "Transcribe all text from this image exactly. Preserve table layout with markdown. Do not describe the image, just extract text.",
+    {
+      inlineData: {
+        data: buffer.toString('base64'),
+        mimeType: mimeType
+      }
+    }
+  ]);
+  return result.response.text();
+}
 
 const MAX_TEXT_LENGTH = 500_000;
 const MIN_CHUNK_LENGTH = 100;
@@ -96,6 +113,15 @@ async function extractTextFromBuffer(fileBuffer: Buffer, filename: string | unde
 
   // Images
   if (mt.startsWith('image/') || lower.match(/\.(png|jpe?g|gif|bmp|tiff?)$/)) {
+    // Try Gemini Flash for fastest OCR
+    try {
+        console.log('Using Gemini 1.5 Flash for OCR...');
+        const text = await extractTextWithGeminiFlash(fileBuffer, mimeType || 'image/png');
+        return text;
+    } catch (e) {
+        console.warn('Gemini Flash failed, falling back to legacy methods:', e);
+    }
+
     // Try GPT Vision if configured. If it fails (network, timeout, model),
     // fall back to Tesseract unless the API key is missing.
     if (process.env.USE_GPT_VISION === '1') {
