@@ -62,15 +62,15 @@ function guessMimeFromFilename(filename: string) {
 
 function stripHtml(html: string): string {
   const withoutScripts = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-                             .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
   const withoutTags = withoutScripts.replace(/<[^>]+>/g, ' ');
   return withoutTags.replace(/\s+/g, ' ').trim();
 }
 
-function parseMultipart(req: VercelRequest): Promise<{ fileBuffer?: Buffer; filename?: string; mimeType?: string; fields: Record<string,string> }> {
+function parseMultipart(req: VercelRequest): Promise<{ fileBuffer?: Buffer; filename?: string; mimeType?: string; fields: Record<string, string> }> {
   return new Promise((resolve, reject) => {
     const busboy = Busboy({ headers: req.headers as any });
-    const fields: Record<string,string> = {};
+    const fields: Record<string, string> = {};
     let fileBuffer: Buffer | undefined;
     let filename: string | undefined;
     let mimeType: string | undefined;
@@ -238,31 +238,56 @@ async function ingestTextAndStore(text: string, providedDocId?: string) {
     console.warn('All chunks filtered out as noise; falling back to ingest original text as one chunk');
     filtered = [text.trim()];
   }
-  
+
   // Parallel Batch Processing
   const BATCH_SIZE = 20;
+  const CONCURRENCY_LIMIT = 5;
   let totalInserted = 0;
-  
-  // Process batches
+
+  // Create batches
+  const batches: string[][] = [];
   for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
-      const batchChunks = filtered.slice(i, i + BATCH_SIZE);
-      console.log(`[Ingest] Processing batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(filtered.length/BATCH_SIZE)} (${batchChunks.length} chunks)`);
-      
-      const embeddings = await embedTextsBatch(batchChunks);
-      
-      const rows = batchChunks.map((chunk, idx) => ({
-          doc_id: docId,
-          text: chunk,
-          embedding: normalizeEmbedding(embeddings[idx])
-      }));
-      
-      const { error } = await supabase.from('chunks').insert(rows as any);
-      if (error) {
-           console.error('Batch insert failed:', error);
-           throw error;
-      }
-      totalInserted += rows.length;
+    batches.push(filtered.slice(i, i + BATCH_SIZE));
   }
+
+  // Processing Helper
+  const processBatch = async (batchChunks: string[], batchIndex: number) => {
+    console.log(`[Ingest] Processing batch ${batchIndex + 1}/${batches.length} (${batchChunks.length} chunks)`);
+    try {
+      const embeddings = await embedTextsBatch(batchChunks);
+      const rows = batchChunks.map((chunk, idx) => ({
+        doc_id: docId,
+        text: chunk,
+        embedding: normalizeEmbedding(embeddings[idx])
+      }));
+
+      const { error } = await supabase.from('chunks').insert(rows as any);
+      if (error) throw error;
+      return rows.length;
+    } catch (err) {
+      console.error(`[Ingest] Batch ${batchIndex + 1} failed:`, err);
+      throw err;
+    }
+  };
+
+  // Run with concurrency limit
+  const results: Promise<any>[] = [];
+  const executing = new Set();
+
+  for (let i = 0; i < batches.length; i++) {
+    const p = processBatch(batches[i], i).then(count => {
+      totalInserted += count;
+      executing.delete(p);
+    });
+    results.push(p);
+    executing.add(p);
+
+    if (executing.size >= CONCURRENCY_LIMIT) {
+      await Promise.race(executing);
+    }
+  }
+
+  await Promise.all(results);
 
   return { docId, chunksInserted: totalInserted };
 }
@@ -399,64 +424,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // file upload
       if (parsed.fileBuffer) {
-          console.log('[UPLOAD] Received file:', {
-            filename: parsed.filename,
-            mimeType: parsed.mimeType,
-            bufferLength: parsed.fileBuffer?.length,
-            bufferType: typeof parsed.fileBuffer,
-          });
-          const filename = parsed.filename || 'upload.bin';
-          const mimeType = parsed.mimeType || guessMimeFromFilename(filename);
-          const fileSize = parsed.fileBuffer?.length || 0;
-          let text = '';
-          try {
-            text = await extractTextFromBuffer(parsed.fileBuffer, filename, mimeType);
-            console.log('[UPLOAD] PDF/Text extraction succeeded. Text length:', text.length);
-          } catch (err) {
-            console.error('[UPLOAD] PDF/Text extraction FAILED:', err);
-            throw err;
-          }
-          // Insert file metadata into files table
-          const docId = fields.docId || randomUUID();
-          let fileError: any = null;
-          const insertResult = await supabase.from('files').insert({
-            id: docId,
-            name: filename,
-            size: fileSize,
-            uploaded_at: new Date().toISOString(),
-            doc_id: docId,
-          });
-          fileError = insertResult.error;
-          if (fileError) {
-            console.error('[UPLOAD] Error inserting file metadata:', fileError);
-          } else {
-            console.log('[UPLOAD] File metadata inserted successfully.');
-          }
-          const result = await ingestTextAndStore(text, docId);
-          console.log('[UPLOAD] Chunking/embedding succeeded. Chunks inserted:', result?.chunksInserted);
-          // If this was an image upload, try to produce chart analysis and cache it for later retrieval
-          try {
-            if ((mimeType || '').toLowerCase().startsWith('image/')) {
-              try {
-                const chart = await analyzeChart(parsed.fileBuffer as Buffer, mimeType || 'image/png');
-                const cacheDir = path.join(process.cwd(), '.agoralearn_cache', 'charts');
-                try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) {}
-                const cachePath = path.join(cacheDir, `${docId}.json`);
-                try { fs.writeFileSync(cachePath, JSON.stringify({ chart, cachedAt: new Date().toISOString() }, null, 2), 'utf8'); } catch (e) { console.warn('Failed to write chart cache', e); }
-                console.log('[UPLOAD] Chart analysis cached for docId', docId);
-              } catch (e) {
-                console.warn('[UPLOAD] Chart analysis failed for image upload:', String(e));
-              }
+        console.log('[UPLOAD] Received file:', {
+          filename: parsed.filename,
+          mimeType: parsed.mimeType,
+          bufferLength: parsed.fileBuffer?.length,
+          bufferType: typeof parsed.fileBuffer,
+        });
+        const filename = parsed.filename || 'upload.bin';
+        const mimeType = parsed.mimeType || guessMimeFromFilename(filename);
+        const fileSize = parsed.fileBuffer?.length || 0;
+        let text = '';
+        try {
+          text = await extractTextFromBuffer(parsed.fileBuffer, filename, mimeType);
+          console.log('[UPLOAD] PDF/Text extraction succeeded. Text length:', text.length);
+        } catch (err) {
+          console.error('[UPLOAD] PDF/Text extraction FAILED:', err);
+          throw err;
+        }
+        // Insert file metadata into files table
+        const docId = fields.docId || randomUUID();
+        let fileError: any = null;
+        const insertResult = await supabase.from('files').insert({
+          id: docId,
+          name: filename,
+          size: fileSize,
+          uploaded_at: new Date().toISOString(),
+          doc_id: docId,
+        });
+        fileError = insertResult.error;
+        if (fileError) {
+          console.error('[UPLOAD] Error inserting file metadata:', fileError);
+        } else {
+          console.log('[UPLOAD] File metadata inserted successfully.');
+        }
+        const result = await ingestTextAndStore(text, docId);
+        console.log('[UPLOAD] Chunking/embedding succeeded. Chunks inserted:', result?.chunksInserted);
+        // If this was an image upload, try to produce chart analysis and cache it for later retrieval
+        try {
+          if ((mimeType || '').toLowerCase().startsWith('image/')) {
+            try {
+              const chart = await analyzeChart(parsed.fileBuffer as Buffer, mimeType || 'image/png');
+              const cacheDir = path.join(process.cwd(), '.agoralearn_cache', 'charts');
+              try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { }
+              const cachePath = path.join(cacheDir, `${docId}.json`);
+              try { fs.writeFileSync(cachePath, JSON.stringify({ chart, cachedAt: new Date().toISOString() }, null, 2), 'utf8'); } catch (e) { console.warn('Failed to write chart cache', e); }
+              console.log('[UPLOAD] Chart analysis cached for docId', docId);
+            } catch (e) {
+              console.warn('[UPLOAD] Chart analysis failed for image upload:', String(e));
             }
-          } catch (e) {
-            console.warn('[UPLOAD] Chart caching step failed:', String(e));
           }
+        } catch (e) {
+          console.warn('[UPLOAD] Chart caching step failed:', String(e));
+        }
 
-          const respObj = { ok: true, file: { id: docId, name: filename }, ...result };
-          console.log('[UPLOAD] Response:', JSON.stringify(respObj));
-          return res.status(200).json(respObj);
+        const respObj = { ok: true, file: { id: docId, name: filename }, ...result };
+        console.log('[UPLOAD] Response:', JSON.stringify(respObj));
+        return res.status(200).json(respObj);
 
-                // ...existing code...
+        // ...existing code...
       }
 
       return res.status(400).json({ error: 'No file or actionable fields found in multipart body' });

@@ -1,3 +1,5 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
 const OPENAI_RESPONSES_ENDPOINT = 'https://api.openai.com/v1/responses';
 
 function getTimeoutMs() {
@@ -6,6 +8,31 @@ function getTimeoutMs() {
 }
 
 export async function ocrWithGptVision(fileBuffer: Buffer, mimeType: string): Promise<string> {
+  // Check provider
+  if (process.env.VISION_PROVIDER === 'gemini') {
+    try {
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+      const geminiModel = genAI.getGenerativeModel({ model: process.env.GEMINI_VISION_MODEL || "gemini-2.0-flash-exp" });
+      const imageBase64 = fileBuffer.toString('base64');
+
+      const result = await geminiModel.generateContent([
+        'Describe the image and extract all readable text. Return both a caption and any extracted text.',
+        {
+          inlineData: {
+            data: imageBase64,
+            mimeType
+          }
+        }
+      ]);
+      return result.response.text();
+    } catch (e) {
+      console.error("Gemini OCR failed, falling back to OpenAI or throwing", e);
+      // Fallback flow could go here, but for now we follow strict provider choice or error
+      if (process.env.VISION_FALLBACK !== 'true') throw e;
+    }
+  }
+
+  // Original OpenAI Logic
   const key = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_VISION_MODEL || 'gpt-4o-mini-vision';
   if (!key) throw new Error('Missing OPENAI_API_KEY for GPT Vision');

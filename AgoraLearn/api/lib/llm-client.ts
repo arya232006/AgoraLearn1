@@ -1,6 +1,9 @@
 import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function callTextModel({
   prompt,
@@ -53,6 +56,32 @@ export async function callVisionModel({
   maxTokens?: number;
   model?: string;
 }) {
+  const provider = process.env.VISION_PROVIDER || 'openai';
+
+  if (provider === 'gemini') {
+    try {
+      const geminiModelName = process.env.GEMINI_VISION_MODEL || "gemini-2.0-flash-exp";
+      const geminiModel = genAI.getGenerativeModel({ model: geminiModelName });
+
+      const result = await geminiModel.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: imageBase64,
+            mimeType
+          }
+        }
+      ]);
+      const response = await result.response;
+      const text = response.text();
+      return { text: text.trim(), raw: response };
+    } catch (err) {
+      console.error("callVisionModel (Gemini) error", err);
+      throw err;
+    }
+  }
+
+  // Fallback / Default to OpenAI
   try {
     const dataUrl = `data:${mimeType};base64,${imageBase64}`;
 
