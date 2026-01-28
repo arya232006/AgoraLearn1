@@ -76,8 +76,8 @@ export async function generateLabReport(manualContext: string, userReadings: str
           "type": "molecule",
           "title": "Water (H2O)",
           "atoms": [
-              {"element": "O", "position": [0, 0, 0], "color": "red"}, 
-              {"element": "H", "position": [0.8, 0.6, 0]}
+              {"element": "O", "position": [0, 0, 0], "color": "red", "hybridization": "sp3"}, 
+              {"element": "H", "position": [0.8, 0.6, 0], "hybridization": "s"}
           ],
           "bonds": [{"from": 0, "to": 1}]
       }

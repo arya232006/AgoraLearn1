@@ -7,7 +7,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 
 // --- Types ---
-type Atom = { element: string; position: [number, number, number]; color?: string };
+type Atom = { element: string; position: [number, number, number]; color?: string; hybridization?: string };
 type Bond = { from: number; to: number }; // Indices in the atoms array
 type Vector = { start: [number, number, number]; end: [number, number, number]; color?: string; label?: string };
 type SimulationParams = {
@@ -464,14 +464,21 @@ const atomColors: Record<string, string> = {
     H: 'white', C: 'gray', N: 'blue', O: 'red', S: 'yellow', P: 'orange', Cl: 'green',
 };
 
-function AtomSphere({ position, element, color }: Atom) {
+function AtomSphere({ position, element, color, hybridization }: Atom) {
     return (
         <mesh position={position}>
             <sphereGeometry args={[element === 'H' ? 0.3 : 0.5, 32, 32]} />
             <meshStandardMaterial color={color || atomColors[element] || 'hotpink'} />
             <Html distanceFactor={10}>
-                <div className="text-xs font-bold text-white bg-black/50 px-1 rounded select-none pointer-events-none">
-                    {element}
+                <div className="flex flex-col items-center pointer-events-none select-none">
+                    <div className="text-xs font-bold text-white bg-black/50 px-1 rounded backdrop-blur-sm border border-white/10">
+                        {element}
+                    </div>
+                    {hybridization && (
+                        <div className="text-[8px] font-mono text-yellow-300 bg-black/60 px-1 rounded mt-0.5 backdrop-blur-sm border border-yellow-500/30">
+                            {hybridization}
+                        </div>
+                    )}
                 </div>
             </Html>
         </mesh>
