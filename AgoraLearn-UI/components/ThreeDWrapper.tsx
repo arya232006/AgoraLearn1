@@ -464,24 +464,102 @@ const atomColors: Record<string, string> = {
     H: 'white', C: 'gray', N: 'blue', O: 'red', S: 'yellow', P: 'orange', Cl: 'green',
 };
 
-function AtomSphere({ position, element, color, hybridization }: Atom) {
+function AtomSphere({ position, element, color }: Atom) {
     return (
         <mesh position={position}>
             <sphereGeometry args={[element === 'H' ? 0.3 : 0.5, 32, 32]} />
             <meshStandardMaterial color={color || atomColors[element] || 'hotpink'} />
             <Html distanceFactor={10}>
-                <div className="flex flex-col items-center pointer-events-none select-none">
-                    <div className="text-xs font-bold text-white bg-black/50 px-1 rounded backdrop-blur-sm border border-white/10">
-                        {element}
-                    </div>
-                    {hybridization && (
-                        <div className="text-[8px] font-mono text-yellow-300 bg-black/60 px-1 rounded mt-0.5 backdrop-blur-sm border border-yellow-500/30">
-                            {hybridization}
-                        </div>
-                    )}
+                <div className="text-xs font-bold text-white bg-black/50 px-1 rounded select-none pointer-events-none border border-white/10">
+                    {element}
                 </div>
             </Html>
         </mesh>
+    );
+}
+
+// Helper to draw an arc between two bonds
+function OrbitalArc({ center, startDir, endDir, label }: { center: [number, number, number], startDir: THREE.Vector3, endDir: THREE.Vector3, label: string }) {
+    const curve = useMemo(() => {
+        const radius = 0.8; // Distance from atom center
+        const start = startDir.clone().normalize().multiplyScalar(radius);
+        const end = endDir.clone().normalize().multiplyScalar(radius);
+
+        // Control point for quadratic curve (approximate circular arc)
+        // Midpoint vector, scaled out slightly
+        const mid = new THREE.Vector3().addVectors(start, end).normalize().multiplyScalar(radius);
+
+        return new THREE.QuadraticBezierCurve3(
+            new THREE.Vector3(...center).add(start),
+            new THREE.Vector3(...center).add(mid),
+            new THREE.Vector3(...center).add(end)
+        );
+    }, [center, startDir, endDir]);
+
+    const points = useMemo(() => curve.getPoints(20), [curve]);
+
+    // Calculate mid position for label
+    const midPoint = curve.getPoint(0.5);
+
+    return (
+        <group>
+            <line>
+                <bufferGeometry setFromPoints={points} />
+                <lineBasicMaterial color="yellow" linewidth={2} />
+            </line>
+            <Html position={[midPoint.x, midPoint.y, midPoint.z]}>
+                <div className="text-[10px] font-mono font-bold text-yellow-300 bg-black/80 px-1.5 py-0.5 rounded border border-yellow-500/50 shadow-[0_0_10px_rgba(253,224,71,0.3)]">
+                    {label}
+                </div>
+            </Html>
+        </group>
+    );
+}
+
+function MoleculeScene({ atoms = [], bonds = [] }: { atoms?: Atom[], bonds?: Bond[] }) {
+    // Build adjacency list to find neighbors for arcs
+    const neighbors = useMemo(() => {
+        const map: Record<number, number[]> = {};
+        bonds.forEach(b => {
+            if (!map[b.from]) map[b.from] = [];
+            if (!map[b.to]) map[b.to] = [];
+            map[b.from].push(b.to);
+            map[b.to].push(b.from);
+        });
+        return map;
+    }, [bonds]);
+
+    return (
+        <group>
+            {atoms.map((atom, i) => (
+                <group key={i}>
+                    <AtomSphere {...atom} />
+                    {/* Render Hybridization Arc if atom has neighbors and label */}
+                    {atom.hybridization && neighbors[i] && neighbors[i].length >= 1 && (() => {
+                        // Pick up to 2 neighbors to draw arc between.
+                        // If only 1, we can't draw an "angle" arc, maybe just a small tick?
+                        // For now, only draw if >= 2 neighbors to show the angle.
+                        // Or if 1 neighbor (like H-C), maybe don't show arc on the H side? Usually hybridization is on central atom.
+                        if (neighbors[i].length < 2) return null;
+
+                        const n1 = atoms[neighbors[i][0]];
+                        const n2 = atoms[neighbors[i][1]];
+
+                        const cPos = new THREE.Vector3(...atom.position);
+                        const v1 = new THREE.Vector3(...n1.position).sub(cPos);
+                        const v2 = new THREE.Vector3(...n2.position).sub(cPos);
+
+                        return <OrbitalArc center={atom.position} startDir={v1} endDir={v2} label={atom.hybridization} />;
+                    })()}
+                </group>
+            ))}
+            {bonds.map((bond, i) => {
+                const start = atoms[bond.from]?.position;
+                const end = atoms[bond.to]?.position;
+                if (!start || !end) return null;
+                return <BondCylinder key={`bond-${i}`} start={start} end={end} />;
+            })}
+        </group>
     );
 }
 
@@ -506,21 +584,7 @@ function BondCylinder({ start, end }: { start: [number, number, number]; end: [n
     );
 }
 
-function MoleculeScene({ atoms = [], bonds = [] }: { atoms?: Atom[], bonds?: Bond[] }) {
-    return (
-        <group>
-            {atoms.map((atom, i) => (
-                <AtomSphere key={i} {...atom} />
-            ))}
-            {bonds.map((bond, i) => {
-                const start = atoms[bond.from]?.position;
-                const end = atoms[bond.to]?.position;
-                if (!start || !end) return null;
-                return <BondCylinder key={`bond-${i}`} start={start} end={end} />;
-            })}
-        </group>
-    );
-}
+
 
 // --- Vector Components ---
 function Arrow({ start, end, color = 'cyan', label }: Vector) {
