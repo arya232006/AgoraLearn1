@@ -97,6 +97,28 @@ export async function generateLabReport(manualContext: string, userReadings: str
       }
     }
 
+    Example Simulation (Gravity):
+    {
+      "kind": "3d",
+      "payload": {
+          "type": "simulation",
+          "title": "Solar System Orbit",
+          "simType": "gravity",
+          "params": { "bodyCount": 5 } 
+      }
+    }
+
+    Example Simulation (Wave):
+    {
+      "kind": "3d",
+      "payload": {
+          "type": "simulation",
+          "title": "Wave Interference Pattern",
+          "simType": "wave",
+          "params": {} 
+      }
+    }
+
     Failure Case (No Data):
     {
       "kind": "text",
@@ -126,7 +148,7 @@ export async function generateLabReport(manualContext: string, userReadings: str
     const result = await model.generateContent(prompt);
     const response = await result.response;
     let text = response.text().trim();
-    
+
     // Clean markdown if present
     if (text.startsWith("```json")) text = text.replace(/```json/g, "").replace(/```/g, "");
     if (text.startsWith("```")) text = text.replace(/```/g, "");
