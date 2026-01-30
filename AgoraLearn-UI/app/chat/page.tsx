@@ -332,21 +332,27 @@ export default function ChatPage() {
   }
 
   // upload using XHR to show progress; result should contain file.id
-  async function handleUpload() {
-    if (!uploadedFile) return;
+  async function handleUpload(fileToUpload?: File) {
+    const file = fileToUpload || uploadedFile;
+    if (!file) return;
+
     setIsUploading(true);
     setError(null);
     setUploadProgress(0);
 
     try {
-      const data = await uploadWithProgress(uploadedFile, (p) => setUploadProgress(p));
+      const data = await uploadWithProgress(file, (p) => setUploadProgress(p));
       const id = data?.file?.id ?? data?.docId ?? data?.id;
-      const name = data?.file?.name ?? uploadedFile.name;
+      const name = data?.file?.name ?? file.name;
       if (!id) throw new Error("Upload response missing id");
 
       // store single doc (replace old)
+      // If valid ID returned, set it
       setUploadedDoc({ id, name });
-      setUploadedFile(null);
+      setUploadedFile(null); // Clear pending file selection
+
+      setShowUploadModal(false); // Close modal if open
+
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3500);
     } catch (err: any) {
@@ -355,6 +361,24 @@ export default function ChatPage() {
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
+    }
+  }
+
+  // Paste handler for the textarea
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault(); // Prevent pasting the binary string/filename
+          handleUpload(file); // Auto-upload
+          return; // Only upload the first file found
+        }
+      }
     }
   }
 
@@ -749,8 +773,8 @@ export default function ChatPage() {
                   {/* Bubble */}
                   <div className={`flex flex-col ${['3d', 'chart', 'table'].includes(m.kind || '') ? 'w-full max-w-full' : 'max-w-[80%]'} ${m.role === "user" ? "items-end" : "items-start"}`}>
                     <div className={`px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role === "user"
-                        ? "bg-indigo-600 text-white rounded-tr-sm"
-                        : "bg-white/5 border border-white/10 text-gray-100 rounded-tl-sm backdrop-blur-md"
+                      ? "bg-indigo-600 text-white rounded-tr-sm"
+                      : "bg-white/5 border border-white/10 text-gray-100 rounded-tl-sm backdrop-blur-md"
                       } ${['3d', 'chart', 'table'].includes(m.kind || '') ? 'w-full' : ''}`}>
                       {m.kind === 'table' && m.payload ? (
                         // render structured tables
@@ -910,6 +934,7 @@ export default function ChatPage() {
                 <textarea
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
+                  onPaste={handlePaste}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !isLoading) {
                       e.preventDefault();
@@ -977,8 +1002,8 @@ export default function ChatPage() {
                     }
                   }}
                   className={`rounded-full h-10 w-10 transition-all ${conversationMode
-                      ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]"
-                      : "text-gray-400 hover:text-white hover:bg-white/10"
+                    ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.3)]"
+                    : "text-gray-400 hover:text-white hover:bg-white/10"
                     }`}
                   title={conversationMode ? "Stop Voice Mode" : "Start Voice Mode"}
                 >
@@ -1049,7 +1074,7 @@ export default function ChatPage() {
               <div className="mt-6 flex justify-end gap-3">
                 <Button onClick={() => setShowUploadModal(false)} variant="ghost" className="text-gray-400 hover:text-white">Cancel</Button>
                 <Button
-                  onClick={handleUpload}
+                  onClick={() => handleUpload()}
                   disabled={isUploading || !uploadedFile}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white"
                 >
