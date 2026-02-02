@@ -12,6 +12,7 @@ const ThreeDWrapper = dynamic(() => import('@components/ThreeDWrapper'), { ssr: 
 const AudioVisualizer = dynamic(() => import('@components/AudioVisualizer'), { ssr: false });
 const QuizInterface = dynamic(() => import('@components/QuizInterface'), { ssr: false });
 import { ExperimentJournal } from '@components/ExperimentJournal';
+import { TableDataEntry, type TableData } from '@components/TableDataEntry';
 
 import { Button } from "@components/ui/button";
 import { Card, CardContent } from "@components/ui/card";
@@ -40,13 +41,15 @@ type Message = {
   id: string;
   role: Role;
   content?: string;
-  kind?: 'text' | 'table' | 'chart' | 'reading-input' | '3d' | 'quiz';
+  kind?: 'text' | 'table' | 'chart' | 'reading-input' | '3d' | 'quiz' | 'table-validation';
   payload?: any;
   createdAt?: string;
   // Lab Assistant specific
   calculations?: any;
   conclusion?: string;
   graphConfig?: any;
+  // Table validation specific
+  tableValidation?: any;
 };
 type RagChunk = { id?: string; text?: string; score?: number; source?: string };
 
@@ -257,9 +260,9 @@ export default function ChatPage() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // single uploaded doc (only one at a time)
+  // multiple uploaded docs (support multiple files)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null); // selected before upload
-  const [uploadedDoc, setUploadedDoc] = useState<{ id: string; name: string } | null>(null); // stored doc from server
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ id: string; name: string }>>([]); // stored docs from server
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -291,6 +294,10 @@ export default function ChatPage() {
   const [selectedText, setSelectedText] = useState<string | null>(null);
 
   const [showAudioViz, setShowAudioViz] = useState(false);
+
+  // Table data entry
+  const [showTableEntry, setShowTableEntry] = useState(false);
+  const [currentTable, setCurrentTable] = useState<TableData | null>(null);
 
   // conversation id (auto-generated)
   const [conversationId, setConversationId] = useState<string | null>(() => {
@@ -346,9 +353,8 @@ export default function ChatPage() {
       const name = data?.file?.name ?? file.name;
       if (!id) throw new Error("Upload response missing id");
 
-      // store single doc (replace old)
-      // If valid ID returned, set it
-      setUploadedDoc({ id, name });
+      // Add to docs array (don't replace)
+      setUploadedDocs(prev => [...prev, { id, name }]);
       setUploadedFile(null); // Clear pending file selection
 
       setShowUploadModal(false); // Close modal if open
@@ -455,7 +461,10 @@ export default function ChatPage() {
           const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
           const fd = new FormData();
           fd.append("audio", blob, "audio.webm");
-          if (uploadedDoc) fd.append("docId", uploadedDoc.id);
+          // Send all uploaded doc IDs
+          if (uploadedDocs.length > 0) {
+            fd.append("docIds", JSON.stringify(uploadedDocs.map(d => d.id)));
+          }
           try {
             const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
             const rsp = await fetch(`${apiBase}/api/voice-query`, { method: "POST", body: fd });
@@ -550,14 +559,29 @@ export default function ChatPage() {
     pushMessage(userMsg);
 
     const payload: any = { query: queryText };
-    if (uploadedDoc) payload.docId = uploadedDoc.id;
+    // Send all uploaded doc IDs
+    if (uploadedDocs.length > 0) {
+      payload.docIds = uploadedDocs.map(d => d.id);
+    }
     if (showInlineReference && referenceText) payload.reference = referenceText;
     if (conversationId) payload.conversationId = conversationId;
 
     try {
       // send to unified prompt router which classifies and returns structured results
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
-      const bodyPayload: any = { text: queryText, docId: uploadedDoc?.id, replyWithAudio: conversationModeRef.current };
+
+      // Build history (last 10 messages, excluding the current one)
+      const history = messages.slice(-10).map(m => ({
+        role: m.role,
+        content: m.content || ""
+      }));
+
+      const bodyPayload: any = {
+        text: queryText,
+        docIds: uploadedDocs.map(d => d.id),
+        replyWithAudio: conversationModeRef.current,
+        history
+      };
       if (showInlineReference && referenceText) bodyPayload.reference = referenceText;
       if (conversationId) bodyPayload.conversationId = conversationId;
 
@@ -688,7 +712,7 @@ export default function ChatPage() {
   // export conversation
   function exportConversation() {
     try {
-      const payload = { conversationId, messages, uploadedDoc, exportedAt: new Date().toISOString() };
+      const payload = { conversationId, messages, uploadedDocs, exportedAt: new Date().toISOString() };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -699,6 +723,39 @@ export default function ChatPage() {
     } catch (err) {
       console.error(err);
       setError("Export failed");
+    }
+  }
+
+  // Handle table data entry
+  function handleOpenTableEntry(table: TableData) {
+    setCurrentTable(table);
+    setShowTableEntry(true);
+  }
+
+  async function handleSaveTableData(tableId: string, data: string[][]) {
+    try {
+      // Update the table in the message
+      setMessages(prev => prev.map(msg => {
+        if (msg.kind === 'table-validation' && msg.tableValidation) {
+          const updatedTables = msg.tableValidation.tables.map((t: any) => {
+            if (t.id === tableId) {
+              return { ...t, rows: data, isFilled: true, completeness: 100 };
+            }
+            return t;
+          });
+          return { ...msg, tableValidation: { ...msg.tableValidation, tables: updatedTables } };
+        }
+        return msg;
+      }));
+
+      setShowTableEntry(false);
+      setCurrentTable(null);
+
+      // Auto-trigger graph plotting
+      await sendQuery("Plot the graph with the filled data");
+    } catch (err) {
+      console.error("Failed to save table data:", err);
+      setError("Failed to save table data");
     }
   }
 
@@ -771,11 +828,11 @@ export default function ChatPage() {
                   </div>
 
                   {/* Bubble */}
-                  <div className={`flex flex-col ${['3d', 'chart', 'table'].includes(m.kind || '') ? 'w-full max-w-full' : 'max-w-[80%]'} ${m.role === "user" ? "items-end" : "items-start"}`}>
+                  <div className={`flex flex-col ${['3d', 'chart', 'table', 'lab_assistant'].includes(m.kind || '') ? 'w-full max-w-full' : 'max-w-[80%]'} ${m.role === "user" ? "items-end" : "items-start"}`}>
                     <div className={`px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role === "user"
                       ? "bg-indigo-600 text-white rounded-tr-sm"
                       : "bg-white/5 border border-white/10 text-gray-100 rounded-tl-sm backdrop-blur-md"
-                      } ${['3d', 'chart', 'table'].includes(m.kind || '') ? 'w-full' : ''}`}>
+                      } ${['3d', 'chart', 'table', 'lab_assistant'].includes(m.kind || '') ? 'w-full' : ''}`}>
                       {m.kind === 'table' && m.payload ? (
                         // render structured tables
                         <div style={{ maxWidth: 800, overflowX: 'auto' }}>
@@ -805,7 +862,7 @@ export default function ChatPage() {
                             </section>
                           )) : <div>No table data</div>}
                         </div>
-                      ) : m.kind === 'chart' && m.payload ? (
+                      ) : (m.kind === 'chart' || m.kind === 'lab_assistant') && m.payload ? (
                         <div className="space-y-3 w-full">
                           <ExperimentJournal currentData={m.payload} currentSummary={m.content || m.conclusion || "Chart Analysis"} />
                           {(() => {
@@ -868,6 +925,54 @@ export default function ChatPage() {
                             Interacting with 3D Ecosystem • {m.payload.type === 'molecule' ? 'Chemistry' : 'Physics'} Mode
                           </div>
                         </div>
+                      ) : m.kind === 'table-validation' && m.tableValidation ? (
+                        <div className="space-y-4 w-full">
+                          <div className="text-sm text-gray-200">
+                            {m.tableValidation.validation?.overallPrompt || m.content}
+                          </div>
+
+                          {/* Display tables with status */}
+                          <div className="space-y-3">
+                            {m.tableValidation.tables?.map((table: any, idx: number) => {
+                              const validation = m.tableValidation.validation?.tableValidations?.[idx];
+                              return (
+                                <div key={table.id} className="bg-white/5 border border-white/10 rounded-lg p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div>
+                                      <h4 className="font-medium text-white">{table.title || `Table ${idx + 1}`}</h4>
+                                      <p className="text-xs text-gray-400">{table.headers.join(' • ')}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-xs px-2 py-1 rounded-full ${table.isFilled
+                                        ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                                        : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                                        }`}>
+                                        {table.isFilled ? '✓ Filled' : `${table.completeness.toFixed(0)}% Complete`}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {!table.isFilled && validation && (
+                                    <div className="mt-3 space-y-2">
+                                      {validation.missingFields?.length > 0 && (
+                                        <p className="text-xs text-gray-400">
+                                          Missing: {validation.missingFields.join(', ')}
+                                        </p>
+                                      )}
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleOpenTableEntry(table)}
+                                        className="bg-indigo-600 hover:bg-indigo-500 text-white"
+                                      >
+                                        Fill Data
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       ) : (
                         renderMathInline(m.content ?? '')
                       )}
@@ -908,14 +1013,22 @@ export default function ChatPage() {
               </div>
             )}
 
-            {/* Uploaded File Preview */}
-            {uploadedDoc && (
-              <div className="mb-3 flex items-center gap-2">
-                <div className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs text-gray-300 flex items-center gap-2">
-                  <FileText className="h-3 w-3 text-indigo-400" />
-                  <span className="max-w-[200px] truncate">{uploadedDoc.name}</span>
-                  <button onClick={() => setUploadedDoc(null)} className="hover:text-red-400 ml-1"><X className="h-3 w-3" /></button>
-                </div>
+            {/* Uploaded Files Preview */}
+            {uploadedDocs.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {uploadedDocs.map((doc, idx) => (
+                  <div key={doc.id} className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg">
+                    <FileText className="h-4 w-4 text-indigo-400" />
+                    <span className="text-sm text-gray-300">{doc.name}</span>
+                    <button
+                      onClick={() => setUploadedDocs(prev => prev.filter((_, i) => i !== idx))}
+                      className="text-gray-400 hover:text-red-400 transition-colors"
+                      title="Remove file"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -1094,6 +1207,18 @@ export default function ChatPage() {
             Ask AI
           </Button>
         </div>
+      )}
+
+      {/* Table Data Entry Modal */}
+      {showTableEntry && currentTable && (
+        <TableDataEntry
+          table={currentTable}
+          onSave={handleSaveTableData}
+          onClose={() => {
+            setShowTableEntry(false);
+            setCurrentTable(null);
+          }}
+        />
       )}
     </div>
   );

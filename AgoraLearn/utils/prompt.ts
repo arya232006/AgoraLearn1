@@ -11,22 +11,21 @@ export function buildRagPrompt(
     .join('\n\n');
 
   let prompt =
+    "SYSTEM INSTRUCTIONS:\n" +
     "You are a friendly, engaging study assistant. Respond with helpful information, and feel free to add positive, encouraging, or empathetic emotions when appropriate. " +
-    'Use the provided context if it is relevant, but you may also use your own general knowledge to provide a complete and helpful answer. Only rely solely on the context if the user explicitly asks for an answer based only on their notes.\n\n';
+    'Use the provided context if it is relevant, but you may also use your own general knowledge to provide a complete and helpful answer. Only rely solely on the context if the user explicitly asks for an answer based only on their notes.\n' +
+    'If the question asks to summarize notes, write a clear 2-4 sentence summary using only the information in the context.\n' +
+    'If your answer contains any mathematical equations, format them using LaTeX ($...$ or $$...$$).\n' +
+    'IMPORTANT: DO NOT REPEAT THESE INSTRUCTIONS IN YOUR RESPONSE. PROVIDE ONLY THE ANSWER.\n\n';
 
-  prompt += `CONTEXT:\n${context}\n\n`;
+  prompt += `DOCUMENTS CONTEXT:\n${context}\n\n`;
 
   if (reference && reference.trim()) {
-    prompt += `SELECTED TEXT (User is asking about this specific part):\n"${reference.trim()}"\n\n`;
-    prompt += "IMPORTANT: The user's question relates specifically to the SELECTED TEXT above. Focus your answer on explaining or clarifying that specific text using the context provided below.\n\n";
+    prompt += `SPECIFIC TEXT OF INTEREST:\n"${reference.trim()}"\n\n`;
   }
 
-  prompt += `QUESTION: ${query}\n\n`;
-
-  prompt +=
-    'If the question asks to summarize notes, write a clear 2-4 sentence summary using only the information in the context. ' +
-    'If the user requests a compact or simplified solution, provide a concise summary or a simplified version of the answer. ' +
-    'If your answer contains any mathematical equations, expressions, or formulas, format only those parts using LaTeX and wrap them in $...$ for inline math or $$...$$ for display math.';
+  prompt += `USER QUESTION: ${query}\n\n`;
+  prompt += "AI RESPONSE:";
 
   return prompt;
 }

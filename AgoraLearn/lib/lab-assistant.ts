@@ -1,10 +1,44 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { ExtractedTable } from './pdf-table-extractor';
+import type { TableValidationResult } from './table-validator';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-export async function generateLabReport(manualContext: string, userReadings: string) {
+export async function generateLabReport(
+  manualContext: string,
+  userReadings: string,
+  extractedTables?: ExtractedTable[],
+  tableValidations?: TableValidationResult[]
+) {
   // Switching to Gemini 2.0 Flash
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+  // Check if we have table validation data
+  let tableContext = '';
+  let hasValidData = false;
+
+  if (extractedTables && tableValidations) {
+    tableContext = '\n\n4. EXTRACTED TABLES FROM PDF:\n';
+
+    for (let i = 0; i < extractedTables.length; i++) {
+      const table = extractedTables[i];
+      const validation = tableValidations[i];
+
+      tableContext += `\nTable ${i + 1}: ${table.title || table.id}\n`;
+      tableContext += `Headers: ${table.headers.join(', ')}\n`;
+      tableContext += `Status: ${validation.isFilled ? 'FILLED' : 'EMPTY/INCOMPLETE'} (${validation.completeness.toFixed(1)}% complete)\n`;
+
+      if (validation.isFilled && validation.canPlotGraph) {
+        hasValidData = true;
+        tableContext += `Data:\n`;
+        for (const row of table.rows) {
+          tableContext += `  ${row.join(', ')}\n`;
+        }
+      } else {
+        tableContext += `Missing fields: ${validation.missingFields.join(', ')}\n`;
+      }
+    }
+  }
 
   const prompt = `
     You are an intelligent Physics Lab Assistant.
@@ -14,19 +48,31 @@ export async function generateLabReport(manualContext: string, userReadings: str
 
     2. STUDENT'S RAW READINGS/DATA:
     "${userReadings}"
+    ${tableContext}
 
     3. YOUR TASK:
+    `;
+
+  console.log('[DEBUG] Lab Assistant Prompt userReadings length:', userReadings.length);
+  if (userReadings.includes('[DATA FROM UPLOADED IMAGE')) {
+    console.log('[DEBUG] Found cached image data in request');
+  }
+
+  const reportPrompt = prompt + `
     - CRITICAL: You must FIRST verify if actual experimental data exists.
     - Check "STUDENT'S RAW READINGS/DATA". Does it contain specific numbers (e.g. "5.1, 5.2" or "V=10")?
+    - Check "EXTRACTED TABLES FROM PDF" (if provided). Are any tables marked as FILLED?
     - Check "LAB MANUAL CONTEXT". Does it contain a FILLED table of results? (Ignore blank/example tables).
     
     - STOP CONDITION: If you can NOT find specific experimental values, you MUST NOT make them up.
       - Return "missing_data": true.
+      - Return "kind": "text".
+      - In "conclusion", provide a helpful message listing which data is missing.
+      - Example: "I found the lab manual with tables for [Variable Names], but the data cells are empty. Please fill in your experimental readings and re-upload the PDF, or provide the data directly."
       - Do NOT generate a graph with "0, 1, 2" or "sample data".
-      - Ask the user to provide the readings.
 
-    - IF DATA IS PRESENT:
-       - Identify the variables and parse the user's data (e.g. V=x, I=y).
+    - IF DATA IS PRESENT (from user readings OR from filled tables):
+       - Identify the variables and parse the data (e.g. V=x, I=y).
        - If the student provides raw readings for calculation (e.g. 5 values for same point), calculate the mean.
        - Perform Linear Regression (if applicable) to find Slope (m) and Intercept (c).
        - If non-linear (Parabola, Hyperbola), fit the appropriate curve.
@@ -97,28 +143,6 @@ export async function generateLabReport(manualContext: string, userReadings: str
       }
     }
 
-    Example Simulation (Gravity):
-    {
-      "kind": "3d",
-      "payload": {
-          "type": "simulation",
-          "title": "Solar System Orbit",
-          "simType": "gravity",
-          "params": { "bodyCount": 5 } 
-      }
-    }
-
-    Example Simulation (Wave):
-    {
-      "kind": "3d",
-      "payload": {
-          "type": "simulation",
-          "title": "Wave Interference Pattern",
-          "simType": "wave",
-          "params": {} 
-      }
-    }
-
     Failure Case (No Data):
     {
       "kind": "text",
@@ -130,6 +154,7 @@ export async function generateLabReport(manualContext: string, userReadings: str
 
     Success Case (Only valid if REAL data was extracted above):
     {
+      "kind": "chart",
       "calculations": {
         "slope": 0.00,
         "intercept": 0.00,

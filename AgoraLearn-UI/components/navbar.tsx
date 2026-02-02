@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Menu, Sparkles } from "lucide-react"
+import { Menu, Sparkles, Bell } from "lucide-react"
 import { useAuthState } from 'react-firebase-hooks/auth'
 import { signOut } from 'firebase/auth'
 import { auth } from '../app/firebase'
@@ -49,10 +49,10 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/20 backdrop-blur-xl supports-[backdrop-filter]:bg-black/20">
-       {/* Subtle animated background behind navbar */}
-       <div className="absolute inset-0 -z-10 h-full w-full overflow-hidden opacity-50">
-          <DarkVeil resolutionScale={0.5} />
-       </div>
+      {/* Subtle animated background behind navbar */}
+      <div className="absolute inset-0 -z-10 h-full w-full overflow-hidden opacity-50">
+        <DarkVeil resolutionScale={0.5} />
+      </div>
 
       <div className="container flex h-16 items-center justify-between px-4 md:px-8 mx-auto">
         {/* Mobile Menu */}
@@ -89,11 +89,11 @@ export default function Navbar() {
               </div>
             </SheetContent>
           </Sheet>
-          
+
           {/* Mobile Logo */}
           <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg text-white">
-             <Sparkles className="h-5 w-5 text-purple-400" />
-             <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">AgoraLearn</span>
+            <Sparkles className="h-5 w-5 text-purple-400" />
+            <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">AgoraLearn</span>
           </Link>
         </div>
 
@@ -101,7 +101,7 @@ export default function Navbar() {
         <div className="hidden md:flex items-center gap-6">
           <Link href="/dashboard" className="flex items-center gap-2 font-bold text-xl text-white mr-4">
             <div className="p-1.5 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 shadow-lg shadow-purple-500/20">
-               <Sparkles className="h-4 w-4 text-white" />
+              <Sparkles className="h-4 w-4 text-white" />
             </div>
             <span className="bg-gradient-to-r from-white via-purple-100 to-white/70 bg-clip-text text-transparent">AgoraLearn</span>
           </Link>
@@ -124,8 +124,9 @@ export default function Navbar() {
           </nav>
         </div>
 
-        {/* User Menu */}
+        {/* Notification Bell */}
         <div className="flex items-center gap-4">
+          <NotificationDisplay />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-9 w-9 rounded-full ring-2 ring-white/10 hover:ring-white/30 transition-all">
@@ -161,4 +162,80 @@ export default function Navbar() {
       </div>
     </header>
   )
+}
+
+function NotificationDisplay() {
+  const [notifications, setNotifications] = React.useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  // Dynamic imports for client-side only
+  const { getNotifications, getUnreadCount, markAsRead, markAllAsRead } = require('../lib/notifications');
+
+  const refresh = () => {
+    setNotifications(getNotifications());
+    setUnreadCount(getUnreadCount());
+  };
+
+  React.useEffect(() => {
+    refresh();
+    window.addEventListener('notification-updated', refresh);
+    return () => window.removeEventListener('notification-updated', refresh);
+  }, []);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative text-white/70 hover:text-white hover:bg-white/10">
+          <Bell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-black" />
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80 bg-black/95 border-white/10 text-white backdrop-blur-xl p-0">
+        <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <h4 className="font-semibold text-sm">Notifications</h4>
+          {unreadCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto p-0 text-xs text-indigo-400 hover:text-indigo-300"
+              onClick={() => markAllAsRead()}
+            >
+              Mark all read
+            </Button>
+          )}
+        </div>
+        <div className="max-h-[300px] overflow-y-auto">
+          {notifications.length === 0 ? (
+            <div className="p-8 text-center text-white/40 text-sm">
+              No notifications yet
+            </div>
+          ) : (
+            notifications.map((note) => (
+              <div
+                key={note.id}
+                className={`p-4 border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer ${!note.read ? 'bg-indigo-500/5' : ''}`}
+                onClick={() => markAsRead(note.id)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${!note.read ? 'bg-indigo-500' : 'bg-transparent'}`} />
+                  <div className="flex-1 space-y-1">
+                    <p className={`text-sm ${!note.read ? 'font-medium text-white' : 'text-white/70'}`}>
+                      {note.title}
+                    </p>
+                    <p className="text-xs text-white/50 line-clamp-2">
+                      {note.message}
+                    </p>
+                    <p className="text-[10px] text-white/30 pt-1">
+                      {new Date(note.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }

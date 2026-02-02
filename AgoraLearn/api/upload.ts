@@ -459,6 +459,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         const result = await ingestTextAndStore(text, docId);
         console.log('[UPLOAD] Chunking/embedding succeeded. Chunks inserted:', result?.chunksInserted);
+
+        // Cache the PDF buffer for later table analysis
+        try {
+          if ((mimeType || '').toLowerCase() === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) {
+            const cacheDir = path.join(process.cwd(), '.agoralearn_cache', 'pdfs');
+            try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { }
+            const cachePath = path.join(cacheDir, `${docId}.pdf`);
+            try {
+              fs.writeFileSync(cachePath, parsed.fileBuffer as Buffer);
+              console.log('[UPLOAD] PDF cached for table analysis:', docId);
+            } catch (e) {
+              console.warn('[UPLOAD] Failed to cache PDF:', e);
+            }
+          }
+        } catch (e) {
+          console.warn('[UPLOAD] PDF caching step failed:', String(e));
+        }
+
         // If this was an image upload, try to produce chart analysis and cache it for later retrieval
         try {
           if ((mimeType || '').toLowerCase().startsWith('image/')) {

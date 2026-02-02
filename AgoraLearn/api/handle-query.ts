@@ -13,30 +13,54 @@ import { generateQuiz } from '../lib/quiz-generator';
 import { runRAG } from '../lib/rag';
 
 
-const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent into one of:
-- "summarize" (user wants a document summary / key points)
-- "table_qa" (user asks about tables in the document or "help with tables")
-- "chart_analysis" (user asks about charts, graphs, trends)
-- "lab_assistant" (user provides experimental readings/data and asks for calculation, graph plotting, or lab report)
-- "3d_viz" (user asks to visualize a molecule, chemical structure, vector field, or 3D concept)
-- "quiz_gen" (user asks for a quiz, test, or exam prep based on the content)
-- "rag_query" (regular document QA / retrieval)
+const CLASSIFY_PROMPT = `You are an assistant that MUST classify a user's request intent based on the CURRENT QUERY and CONVERSATION HISTORY.
 
+Intents:
+- "summarize": User wants a summary or key points.
+- "table_qa": User asks about specific data in tables.
+- "chart_analysis": User asks about charts, graphs, or trends.
+- "lab_assistant": User provides experimental readings/data (even if vaguely like "there u go", "here is the data", "check this") and expects calculations or graph plotting.
+- "3d_viz": User asks for 3D visualization or concept simulation.
+- "quiz_gen": User wants a quiz or practice questions.
+- "rag_query": General questions or document QA.
 
-Return ONLY a JSON object (no extra text) like:
-{"intent":"summarize","confidence":0.95}
+Context Rules:
+1. If the previous messages were about a graph/experiment and the user now says "there u go" or provides an image, classify as "lab_assistant".
+2. If the user provides an image with an experimental table, classify as "lab_assistant".
 
-User request:\n`;
+Return ONLY JSON: {"intent":"...","confidence":0.95}
+
+Conversation History:
+{{HISTORY}}
+
+Current Query:
+{{QUERY}}
+`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
-  const { text, docId, imageBase64, mimeType, question, reference, docText } = req.body || {};
+  const { text, docId, docIds, imageBase64, mimeType, question, reference, docText, history } = req.body || {};
   if (!text || typeof text !== 'string') return res.status(400).json({ ok: false, message: 'Missing text' });
+
+  // Support both single docId and multiple docIds
+  const documentIds = docIds || (docId ? [docId] : []);
 
   try {
     // 1) classify intent
-    const classifyResp = await callTextModel({ prompt: CLASSIFY_PROMPT + text, maxTokens: 200 });
+    const historyText = Array.isArray(history)
+      ? history.map((ms: any) => `${ms.role}: ${ms.content}`).join('\n')
+      : 'No history';
+
+    console.log('[DEBUG] Classifying intent for query:', text);
+    console.log('[DEBUG] With history:\n', historyText);
+
+    const classificationPrompt = CLASSIFY_PROMPT
+      .replace('{{HISTORY}}', historyText)
+      .replace('{{QUERY}}', text);
+
+    const classifyResp = await callTextModel({ prompt: classificationPrompt, maxTokens: 200 });
+    console.log('[DEBUG] Raw classification response:', classifyResp.text);
     let classification: { intent?: string; confidence?: number } = {};
 
     try {
@@ -71,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       classification.intent = 'rag_query';
     }
 
-    const intent = classification.intent || 'rag_query';
+    let intent = classification.intent || 'rag_query';
 
     // 2) route based on intent
     if (intent === 'summarize') {
@@ -132,15 +156,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // If user provided a text reference or extracted document text, try to parse tables from text
       let tableSource = (reference && String(reference).trim()) || (docText && String(docText).trim()) || null;
-      // If no inline text provided but a docId exists, try to fetch extracted text from the chunks table
-      if (!tableSource && docId) {
+      // If no inline text provided but documentIds exist, try to fetch extracted text from the chunks table
+      if (!tableSource && documentIds.length > 0) {
         try {
-          const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', docId);
-          if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
-            tableSource = chunkRows.map((r: any) => r.text).join('\n');
+          // Fetch chunks from all uploaded documents
+          const allChunks: string[] = [];
+          for (const id of documentIds) {
+            const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', id);
+            if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
+              allChunks.push(...chunkRows.map((r: any) => r.text));
+            }
+          }
+          if (allChunks.length > 0) {
+            tableSource = allChunks.join('\n');
           }
         } catch (e) {
-          console.warn('Failed to fetch chunks for docId', docId, String(e));
+          console.warn('Failed to fetch chunks for documentIds', documentIds, String(e));
         }
       }
       if (tableSource) {
@@ -185,36 +216,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       let manualContext = (reference && String(reference).trim()) || (docText && String(docText).trim()) || null;
+      let cachedTableData = '';
 
-      // If no manual text passed directly, try to fetch chunks
-      if (!manualContext && docId) {
+      // If no manual text passed directly, try to fetch chunks from all documents
+      if (documentIds.length > 0) {
         try {
-          const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', docId);
-          if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
-            manualContext = chunkRows.map((r: any) => r.text).join('\n').substring(0, 15000);
+          const path = await import('path');
+          const fs = await import('fs');
+          const allChunks: string[] = [];
+
+          for (const id of documentIds) {
+            // Check for cached chart analysis (from images)
+            const chartCachePath = path.join(process.cwd(), '.agoralearn_cache', 'charts', `${id}.json`);
+            if (fs.existsSync && fs.existsSync(chartCachePath)) {
+              try {
+                const raw = fs.readFileSync(chartCachePath, 'utf8');
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.chart) {
+                  cachedTableData += `\n\n[DATA FROM UPLOADED IMAGE ${id}]:\n${JSON.stringify(parsed.chart.extracted || parsed.chart, null, 2)}`;
+                }
+              } catch (e) { }
+            }
+
+            // Fetch chunks for RAG context
+            const { data: chunkRows, error: chunkErr } = await supabase.from('chunks').select('text').eq('doc_id', id);
+            if (!chunkErr && Array.isArray(chunkRows) && chunkRows.length > 0) {
+              allChunks.push(...chunkRows.map((r: any) => r.text));
+            }
+          }
+          if (allChunks.length > 0) {
+            manualContext = allChunks.join('\n').substring(0, 15000);
           }
         } catch (e) {
-          console.warn('Failed to fetch chunks for Lab Assistant', docId, String(e));
+          console.warn('Failed to fetch chunks/cache for Lab Assistant', documentIds, String(e));
         }
       }
 
-      const report = await generateLabReport(manualContext || '', userReadings); // text is the user's readings/prompt
+      const report = await generateLabReport(manualContext || '', userReadings + cachedTableData, undefined, undefined);
 
       // Safety Check: If the report indicates missing data, ensure we don't pass a graphConfig by accident
       if (report && report.missing_data) {
-        return res.json({
-          ok: true,
-          intent,
-          confidence: classification.confidence,
-          result: {
-            // Strip graphConfig if it exists
-            conclusion: report.conclusion || "I need experimental data to proceed.",
-            graphConfig: null
-          }
-        });
+        console.log('[DEBUG] Lab Assistant reported missing data. Falling back to RAG/Hybrid flow.');
+        // If Lab Assistant fails, we might still want to try RAG + Hybrid Chart
+        intent = 'rag_query';
+      } else {
+        return res.json({ ok: true, intent, confidence: classification.confidence, result: report });
       }
-
-      return res.json({ ok: true, intent, confidence: classification.confidence, result: report });
     }
 
     if (intent === 'quiz_gen') {
@@ -229,31 +276,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // default: RAG query (forward to existing RAG endpoint)
     if (intent === 'rag_query') {
-      if (!docId) return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'No docId provided. Please ingest the document first or provide docId.' } });
+      if (documentIds.length === 0) return res.json({ ok: true, intent, confidence: classification.confidence, result: { message: 'I\'d love to help! 📄 To answer questions about your documents, please upload a file first using the paperclip icon (📎) or paste it directly with Ctrl+V.' } });
 
       try {
-        console.log(`[Handle Query] Running RAG directly for docId: ${docId}${reference ? ' with reference' : ''}`);
-        const forwarded = await runRAG(text, 5, docId, undefined, undefined, reference); // Using topK=5 for speed/relevance
+        console.log(`[Handle Query] Running RAG for ${documentIds.length} document(s)${reference ? ' with reference' : ''}`);
+
+        // Fetch chunks from all uploaded documents
+        const allChunks: any[] = [];
+        for (const id of documentIds) {
+          const forwarded = await runRAG(text, 5, id, history, undefined, reference);
+          if (forwarded?.chunks) {
+            allChunks.push(...forwarded.chunks);
+          }
+        }
+
+        // Use the first document's RAG response as base, but with merged chunks
+        const forwarded = await runRAG(text, 5, documentIds[0], history, undefined, reference);
+        if (allChunks.length > 0) {
+          forwarded.chunks = allChunks;
+        }
 
         // --- HYBRID GENERATION: If user asks for Plot/Graph, call Gemini ---
         let chartConfig: any = null;
         let finalIntent = intent;
 
         const lowerQ = text.toLowerCase();
-        // Check for Intent OR Keywords (covering multi-lingual cases via LLM classification)
+
+        // Check for Intent OR Keywords OR History
+        const historyHasPlot = Array.isArray(history) && history.slice(-3).some((m: any) => {
+          const content = (m.content || "").toLowerCase();
+          return content.includes("plot") || content.includes("graph") || content.includes("chart");
+        });
+
         const isPlotRequest =
           (initialIntent === 'chart_analysis' || initialIntent === 'lab_assistant') ||
-          (lowerQ.includes("plot") || lowerQ.includes("graph") || lowerQ.includes("chart"));
+          (lowerQ.includes("plot") || lowerQ.includes("graph") || lowerQ.includes("chart")) ||
+          (historyHasPlot && (text.length < 50 || lowerQ.includes("data") || lowerQ.includes("here") || lowerQ.includes("go") || lowerQ.includes("plot")));
 
         if (isPlotRequest && forwarded?.answer) {
           console.log("[Handle Query] Attempting Hybrid Chart Generation...");
           // Combine query + retrieved answer context for Gemini to see data
           // IMPORTANT: Include 'chunks' from RAG if available, as they contain the raw numbers
           const ragContext = forwarded.chunks ? forwarded.chunks.map((c: any) => c.text).join('\n\n') : '';
-          const hybridContext = `User Query: ${text}\n\nAI Analysis/Answer: ${forwarded.answer}\n\nRetrieved Document Content:\n${ragContext}`;
+
+          // Add history to hybrid context so Gemini knows what we're plotting
+          const historyContext = Array.isArray(history)
+            ? history.map((ms: any) => `${ms.role}: ${ms.content}`).join('\n')
+            : '';
+
+          const hybridContext = `Conversation History:\n${historyContext}\n\nUser Query: ${text}\n\nAI Analysis/Answer: ${forwarded.answer}\n\nRetrieved Document Content:\n${ragContext}`;
 
           chartConfig = await generateChartWithGemini(hybridContext, text);
-          console.log("[Handle Query] Chart Config Result:", chartConfig ? "Success" : "Failed");
+          console.log("[Handle Query] Chart Config Result:", chartConfig && !chartConfig.missing_data ? "Success" : "Failed/Missing Data");
 
           if (chartConfig && !chartConfig.missing_data) {
             finalIntent = "lab_assistant"; // Switch intent so frontend renders the chart
