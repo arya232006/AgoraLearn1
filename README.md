@@ -14,7 +14,7 @@
 - **📈 Advanced Lab Assistant**: Parses experimental data to generate error-bar plots, performs Polynomial/Exponential regression, and writes formal lab conclusions.
 - **🗣️ Multilingual Voice Interaction**: Speak in 30+ languages; the system auto-detects, translates, and responds in your native tongue.
 - **📚 RAG & Document QA**: Context-aware answers from uploaded textbooks or lab manuals.
-- **Scientific Graphing**: "Lab Mode" renders charts on engineering graph paper with 1mm grid scaling and pan/zoom capabilities.
+- **Scientific Graphing**: "Lab Mode" renders charts on engineering graph paper with  1mm grid scaling and pan/zoom capabilities.
 
 **Quick Start (Backend)**
 - **Prerequisites:**: Node 18+, npm, a Supabase project with vector embeddings, Lingo.dev API key, OpenAI API key (if used), and `.env` configured.
