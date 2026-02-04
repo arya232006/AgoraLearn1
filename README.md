@@ -10,7 +10,7 @@
   - **Visualization**: React Three Fiber (3D), Chart.js (2D Analysis), Recharts.
 
 **Features**
-- **🔬 Interactive Physics Simulations**: Real-time 3D simulations for Projectile Motion, Optics (Ray Tracing), Molecular Structures, and Vector Fields.
+- ** Interactive Physics Simulations**: Real-time 3D simulations for Projectile Motion, Optics (Ray Tracing), Molecular Structures, and Vector Fields.
 - **📈 Advanced Lab Assistant**: Parses experimental data to generate error-bar plots, performs Polynomial/Exponential regression, and writes formal lab conclusions.
 - **🗣️ Multilingual Voice Interaction**: Speak in 30+ languages; the system auto-detects, translates, and responds in your native tongue.
 - **📚 RAG & Document QA**: Context-aware answers from uploaded textbooks or lab manuals.
